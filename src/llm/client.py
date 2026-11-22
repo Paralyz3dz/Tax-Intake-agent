@@ -1,19 +1,17 @@
 """
 client.py: the only place in the project that talks to an LLM provider.
 
-Everything else calls chat_json() and never imports a provider SDK, so switching
-OpenAI -> Claude (or a local model) means changing only this file.
-
-Reads from .env: OPENAI_API_KEY, OPENAI_EXTRACT_MODEL or OPENAI_MODEL (default gpt-4o-mini).
+Everything else calls chat_json() and never imports a provider SDK. Any OpenAI-compatible
+server works (OpenAI, OpenRouter, DeepSeek, Azure, a local Ollama or vLLM): set LLM_BASE_URL,
+LLM_API_KEY and LLM_EXTRACT_MODEL (see src/config.py; the old OPENAI_* names still work).
 """
 from __future__ import annotations
 
 from base64 import b64encode
 from collections.abc import Sequence
 import json
-import os
 
-from dotenv import load_dotenv
+from src.config import llm_settings
 
 
 class LLMUnavailable(RuntimeError):
@@ -24,9 +22,8 @@ class LLMUnavailable(RuntimeError):
 
 
 def is_configured() -> bool:
-    """True if OPENAI_API_KEY is set (in the environment or .env)."""
-    load_dotenv()
-    return bool(os.getenv("OPENAI_API_KEY"))
+    """True if a key, or a self-hosted base URL, is set (in the environment or .env)."""
+    return llm_settings().configured
 
 
 def chat_json(system: str, user: str, model: str | None = None, timeout: float = 30, *,
@@ -38,10 +35,9 @@ def chat_json(system: str, user: str, model: str | None = None, timeout: float =
     The openai package is imported only here, at call time, so tests and rules-only
     runs do not need it installed. Any failure is raised as LLMUnavailable.
     """
-    load_dotenv()
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise LLMUnavailable("OPENAI_API_KEY is not set")
+    settings = llm_settings()
+    if not settings.configured:
+        raise LLMUnavailable("No model configured: set LLM_API_KEY (or OPENAI_API_KEY) or LLM_BASE_URL")
     try:
         from openai import OpenAI
     except ImportError as exc:
@@ -57,9 +53,9 @@ def chat_json(system: str, user: str, model: str | None = None, timeout: float =
                 "detail": "high",
             }})
     try:
-        client = OpenAI(api_key=api_key, timeout=timeout)
+        client = OpenAI(api_key=settings.client_key, base_url=settings.base_url, timeout=timeout)
         response = client.chat.completions.create(
-            model=model or os.getenv("OPENAI_EXTRACT_MODEL", os.getenv("OPENAI_MODEL", "gpt-4o-mini")),
+            model=model or settings.extract_model,
             temperature=0,
             response_format=response_format or {"type": "json_object"},
             messages=[{"role": "system", "content": system},

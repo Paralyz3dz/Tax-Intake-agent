@@ -1,0 +1,20 @@
+# Keep secrets, real interview data and large local files out of the image.
+.env
+.env.*
+!.env.example
+.git
+.venv*/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+logs/
+interview_summaries/
+models/
+data/
+!data/processed/guide_evidence.json
+eval/
+tests/
+docs/
+scripts/
+*.sqlite3
+tall -r requirements.txt

@@ -1,0 +1,15 @@
+# HTTPS in front of the app. Caddy gets and renews the certificate for $DOMAIN by itself.
+{$DOMAIN} {
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+		X-Frame-Options DENY
+	}
+	request_body {
+		# uploads: up to 10 files of 10 MB (src/app/documents.py)
+		max_size 110MB
+	}
+	reverse_proxy app:8000
+}

@@ -1,0 +1,20 @@
+# What the web service (src/app) and the MCP server need at runtime: the Docker image installs this.
+# requirements.txt adds the offline tools (PDF parsing, embedding, bge reranker / torch, streamlit).
+fastapi==0.165.0
+uvicorn==0.54.0
+python-multipart==0.0.34
+pydantic==2.14.3
+python-dotenv==1.2.4
+openai==3.55.1
+langchain==1.5.2
+langchain-core==1.8.3
+langchain-openai==1.8.3
+psycopg[binary]==3.3.9
+pgvector==0.5.1
+numpy==2.5.5
+rank-bm25==0.2.2
+reportlab==5.1.0
+pypdf==7.1.1
+pillow==13.0.0
+requests==2.34.2
+mcp==2.3.0

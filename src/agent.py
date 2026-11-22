@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import os
-
-from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
+from src.config import llm_settings
 from src.rag.retriever import retrieve
 
 
@@ -34,15 +32,15 @@ def search_tax_documents(query: str) -> dict:
 
 
 def create_tax_agent():
-    load_dotenv()
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("Set OPENAI_API_KEY in your environment or .env file.")
+    settings = llm_settings()
+    if not settings.configured:
+        raise RuntimeError("Set LLM_API_KEY (or OPENAI_API_KEY) or LLM_BASE_URL in your environment or .env file.")
 
     model = ChatOpenAI(
-        model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-        temperature=float(os.getenv("OPENAI_TEMPERATURE", "0.5")),
-        api_key=api_key,
+        model=settings.model,
+        temperature=settings.temperature,
+        api_key=settings.client_key,
+        base_url=settings.base_url,
     )
     tools = [search_tax_documents]
     tool_list = "\n".join(f"- {item.name}: {item.description}" for item in tools)
