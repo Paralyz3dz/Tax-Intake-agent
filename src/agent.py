@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from langchain.agents import create_agent
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
 from src.config import llm_settings
+from src.llm.client import check_call_guard
 from src.rag.retriever import retrieve
 
 
@@ -31,6 +33,19 @@ def search_tax_documents(query: str) -> dict:
     return retrieve(query)
 
 
+class CallGuard(BaseCallbackHandler):
+    """Runs the call guard (src/llm/client.py) before each of the agent's model calls.
+
+    The agent's model does not go through chat_json(), so without this its calls would not
+    count against the daily budget. raise_error makes LangChain stop the call when the guard
+    raises LLMUnavailable, instead of only logging it.
+    """
+    raise_error = True
+
+    def on_chat_model_start(self, serialized, messages, **kwargs) -> None:
+        check_call_guard()
+
+
 def create_tax_agent():
     settings = llm_settings()
     if not settings.configured:
@@ -41,6 +56,7 @@ def create_tax_agent():
         temperature=settings.temperature,
         api_key=settings.client_key,
         base_url=settings.base_url,
+        callbacks=[CallGuard()],
     )
     tools = [search_tax_documents]
     tool_list = "\n".join(f"- {item.name}: {item.description}" for item in tools)

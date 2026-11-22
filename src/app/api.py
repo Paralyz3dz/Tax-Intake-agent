@@ -38,6 +38,7 @@ from src.app.interviews import (DocumentExtractionUnavailable, InvalidInterviewA
                                 list_playbooks)
 from src.app.interview_pdf import render_interview_pdf, render_review_pdf
 from src.app.limits import current_visitor, get_budget
+from src.llm.client import LLMUnavailable, set_call_guard
 from src.config import app_settings
 from src.workflow.engine import INTAKE
 
@@ -71,11 +72,13 @@ async def lifespan(app: FastAPI):
 
     If the chat agent cannot be created (e.g. no OPENAI_API_KEY), only /api/chat is
     disabled (503); the guided interview still works. A public site with missing sign-in
-    settings refuses to start (auth.check_public_settings).
+    settings refuses to start (auth.check_public_settings). The daily budget is installed as
+    the model call guard for as long as the app runs.
     """
     app.state.settings = app_settings()
     auth.check_public_settings(app.state.settings)
     app.state.login_attempts = auth.LoginAttempts()
+    set_call_guard(get_budget().charge)
     try:
         app.state.agent = create_tax_agent()
     except Exception as exc:
@@ -86,6 +89,7 @@ async def lifespan(app: FastAPI):
     app.state.sessions_lock = Lock()
     retention = asyncio.create_task(_retention_loop(app.state.interviews, app.state.settings.retention_days))
     yield
+    set_call_guard(None)
     retention.cancel()
     with suppress(asyncio.CancelledError):
         await retention
@@ -237,17 +241,21 @@ def index():
     return FileResponse(Path(__file__).parent / "static" / "index.html")
 
 
+DAILY_LIMIT = "The daily limit for questions has been reached. Please try again tomorrow."
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(payload: ChatRequest, request: Request):
     """Free-form tax Q&A: run the LangChain agent (retrieval tool + OpenAI) on the session's history.
 
-    503 if the agent is not configured, 404 for an unknown session, 502 if the agent fails;
-    a failed turn does not change the saved history."""
+    503 if the agent is not configured, 404 for an unknown session, 502 if the agent fails,
+    429 if the daily model-call budget is spent (before or during the answer; each model call
+    the agent makes is counted by the call guard). A failed turn does not change the saved history."""
     state = request.app.state
     if state.agent is None:
         raise HTTPException(503, "Chat is not configured. Set LLM_API_KEY and restart.")
-    if not get_budget().take(current_visitor.get()):
-        raise HTTPException(429, "The daily limit for questions has been reached. Please try again tomorrow.")
+    if not get_budget().allows(current_visitor.get()):
+        raise HTTPException(429, DAILY_LIMIT)
     session_id = payload.session_id or uuid4()
     with state.sessions_lock:
         if payload.session_id is not None:
@@ -273,6 +281,8 @@ def chat(payload: ChatRequest, request: Request):
             )
             if not answer.strip():
                 raise ValueError("Agent returned an empty answer.")
+        except LLMUnavailable:
+            raise HTTPException(429, DAILY_LIMIT) from None
         except Exception:
             logger.exception("Chat agent invocation failed")
             raise HTTPException(502, "Unable to get an answer. Please try again.") from None
