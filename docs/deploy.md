@@ -40,14 +40,24 @@ retrieval; without it they answer "currently unavailable".
 
 ## Server
 
-Any VM with Docker works, for example AWS Lightsail or EC2 with Ubuntu 24.04:
-2 GB of RAM without Ollama, 4 GB with it. Open ports 22, 80 and 443.
-If the knowledge base is on RDS, allow the server's IP address in the RDS security group.
+Any VM with Docker works. These steps use AWS Lightsail, in the same region as the RDS
+knowledge base (us-west-2):
+
+1. Create an instance: platform **Linux operating system**, blueprint **Ubuntu 24.04 LTS**,
+   plan **4 GB** (2 GB is enough without Ollama, i.e. without the chat page and tax questions).
+2. **Networking** tab: attach a static IP, and add an IPv4 firewall rule for **HTTPS (443)**
+   from any IPv4 address. SSH (22) and HTTP (80) are there by default.
+3. Allow the static IP in the RDS security group: RDS > the database > Connectivity &
+   security > VPC security group > Inbound rules > add **PostgreSQL (5432)** from `<static IP>/32`.
+   Keep the existing rules.
+
+Then, in the browser SSH window (**Connect using SSH**):
 
 ```bash
-curl -fsSL https://get.docker.com | sh
-git clone https://github.com/Paralyz3dz/EE542-Finalproject.git tax-agent && cd tax-agent
-cp .env.example .env && nano .env
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker ubuntu && newgrp docker      # run docker without sudo
+git clone https://github.com/Paralyz3dz/Tax-Intake-agent.git tax-agent && cd tax-agent
+nano .env && chmod 600 .env
 ```
 
 Settings in `.env` for a public site:
@@ -55,15 +65,25 @@ Settings in `.env` for a public site:
 ```dotenv
 TAX_AGENT_MODE=public
 TAX_AGENT_SESSION_SECRET=<from auth secret>
-TAX_AGENT_PREPARERS=alice:<hash>
-TAX_AGENT_INVITE_CODES=demo-2026-12
-LLM_API_KEY=<key>
+TAX_AGENT_PREPARERS='alice:<hash>'
+TAX_AGENT_INVITE_CODES=<a code people cannot guess>
 TAX_AGENT_LLM_CALLS_PER_VISITOR=200
-TAX_AGENT_LLM_CALLS_PER_DAY=2000
+TAX_AGENT_LLM_CALLS_PER_DAY=3600   # about 110 per visitor; 3600 serves 30 people
 TAX_AGENT_RETENTION_DAYS=30
 DOMAIN=203-0-113-7.sslip.io        # the server's IP with dashes, or your own domain
-DATABASE_URL=<RDS URL>             # only with --profile retrieval
+
+LLM_API_KEY=<key>
+DATABASE_URL='<RDS URL>'           # only with --profile retrieval
+EMBEDDING_MODEL=<as in your local .env>
+OLLAMA_EMBEDDING_MODEL=qwen3-embedding:0.6b
 ```
+
+- **Keep the single quotes** around `TAX_AGENT_PREPARERS` and `DATABASE_URL`. A password hash
+  contains `$`, and Docker Compose replaces `$name` in `.env` with a variable (usually empty)
+  unless the value is single-quoted.
+- `EMBEDDING_MODEL` and `OLLAMA_EMBEDDING_MODEL` must match what the knowledge base was built
+  with, or live retrieval finds nothing.
+- Interviews always go to the `interviews` volume (`/data`); docker-compose.yml sets the path.
 
 No domain? `sslip.io` turns an IP address into a host name a certificate can be issued for:
 `203-0-113-7.sslip.io` points to `203.0.113.7`.
@@ -73,11 +93,24 @@ Start it:
 ```bash
 docker compose --profile https up -d --build                        # interview only
 docker compose --profile https --profile retrieval up -d --build    # + chat page and tax questions
-curl https://$DOMAIN/healthz
+docker compose ps                                                   # app should become "healthy"
 ```
 
 The app refuses to start in public mode without a session secret of at least 32 characters
 and at least one preparer account; `docker compose logs app` shows why.
+
+Check it:
+
+```bash
+curl https://$DOMAIN/healthz          # {"status":"ok","mode":"public",...,"guide_passages":154}
+docker compose exec app python -c "from src.rag.retriever import retrieve; print(len(retrieve('standard deduction')['matches']))"
+```
+
+The second command should print `5`. A `ConnectionTimeout` means the RDS security group does
+not allow the server's IP yet (step 3).
+
+To stop paying for the server: a stopped Lightsail instance is still billed. Create a snapshot,
+then delete the instance, and delete the static IP (an unattached static IP is billed too).
 
 ## Who can use what (public mode)
 
@@ -110,7 +143,10 @@ agent makes. Exact answers (yes/no, amounts, options) and prebuilt guide passage
 
 So 200 calls per visitor is about 100 free-text answers or 60 chat messages. When the budget
 runs out during live retrieval, passages come back unranked instead of failing.
-The MCP server's process counts its reranking calls against the same caps.
+The MCP server is a separate process with its own counters: it reads the same two limits but
+does not share the web app's count. It has no per-browser visitors, so all MCP use shares one
+visitor allowance; its only calls with the site's key are reranking in live retrieval, which
+falls back to unranked passages when the allowance is spent.
 Also set a monthly budget in the provider's dashboard as a last line of defence.
 
 To avoid the site's key entirely, point `LLM_BASE_URL` at a self-hosted model, or set
