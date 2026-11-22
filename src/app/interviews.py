@@ -5,29 +5,26 @@ Framework-free on purpose: api.py only translates HTTP <-> these methods, so thi
 is tested without FastAPI and could sit behind any other UI later.
 Interviews and their current outputs are stored by owner so they can be resumed.
 
-Reads from .env:
-    TAX_AGENT_RETRIEVAL  "off" = no retrieval (no DB / Ollama needed)
-    TAX_AGENT_LLM        "off" = exact answers only
-    OPENAI_API_KEY       used for Listwise ranking and the model note reader
+Settings come from src/config.py (TAX_AGENT_RETRIEVAL, TAX_AGENT_LLM, the LLM_* provider,
+interview storage).
 """
 from __future__ import annotations
 
 import json
 import logging
-import os
 from dataclasses import dataclass
-from pathlib import Path
+from datetime import datetime, timedelta, timezone
 from threading import Lock
 from time import monotonic
 from uuid import uuid4
 
-from dotenv import load_dotenv
-
+from src.config import app_settings
 from src.app.documents import TAX_YEAR, extract_document_facts
 from src.db.interview_store import Interview, InterviewStore
 from src.llm.interview_qa import respond_to_question
 from src.workflow.engine import (INTAKE, MODULES, PLAYBOOKS, apply_triggers, load_scenario, record_answer, review, undo, sections,
                                  start_interview, step, summarize)
+from src.workflow.guide_evidence import load as load_guide_evidence
 from src.workflow.state import State
 
 logger = logging.getLogger(__name__)
@@ -116,10 +113,14 @@ class InterviewService:
 
     search      retrieval function (None = real retrieval via engine._default_search)
     normalizer  model note reader from src/llm/normalize.py (None = rules only)
+    evidence    prebuilt guide passages (src/workflow/guide_evidence.py), served before any
+                live retrieval; None = always retrieve live
     """
 
-    def __init__(self, search=None, normalizer=None, document_chat=None, store=None, *, tax_chat=None):
+    def __init__(self, search=None, normalizer=None, document_chat=None, store=None, *, tax_chat=None,
+                 evidence=None):
         self.search = search
+        self.evidence = evidence
         self.normalizer = normalizer
         self.document_chat = document_chat
         self.tax_chat = tax_chat
@@ -130,29 +131,29 @@ class InterviewService:
 
     @classmethod
     def from_env(cls) -> "InterviewService":
-        """Build the service from .env switches: real retrieval unless TAX_AGENT_RETRIEVAL=off,
-        model note reader if OPENAI_API_KEY is set and TAX_AGENT_LLM is not off."""
-        root = Path(__file__).resolve().parents[2]
-        load_dotenv(root / ".env")
-        search = None
-        if os.getenv("TAX_AGENT_RETRIEVAL", "on").lower() == "off":
-            search = _no_search
+        """Build the service from settings (src/config.py): real retrieval unless
+        TAX_AGENT_RETRIEVAL=off, model calls if a model is configured and TAX_AGENT_LLM is not off.
+
+        One metered chat serves the note reader, tax questions and document reading, so every
+        model call counts against the visitor's and the site's daily cap (src/app/limits.py)."""
+        settings = app_settings()
+        search = None if settings.retrieval_enabled else _no_search
         normalizer = None
         document_chat = None
-        if os.getenv("TAX_AGENT_LLM", "on").lower() != "off":
-            from src.llm.client import chat_json
+        if settings.llm_enabled:
+            from src.app.limits import get_budget
+            from src.llm.client import chat_json, is_configured
             from src.llm.normalize import make_normalizer
-            normalizer = make_normalizer()
-            if normalizer is not None:
-                document_chat = chat_json
+            if is_configured():
+                document_chat = get_budget().metered(chat_json)
+                normalizer = make_normalizer(chat=document_chat)
         logger.info("Interview service: retrieval=%s, llm=%s",
                     "off" if search else "on", "on" if normalizer else "off")
-        store = InterviewStore(
-            path=os.getenv("TAX_AGENT_INTERVIEW_DB_PATH") or root / "logs" / "interviews.sqlite3",
-            postgres_url=os.getenv("TAX_AGENT_INTERVIEW_DATABASE_URL"),
-        )
+        store = InterviewStore(path=settings.interview_db_path, postgres_url=settings.interview_database_url)
+        evidence = load_guide_evidence(settings.guide_evidence)
+        logger.info("Guide passages: %s", f"{len(evidence)} prebuilt" if evidence else "live retrieval only")
         return cls(search=search, normalizer=normalizer, document_chat=document_chat, store=store,
-                   tax_chat=document_chat)
+                   tax_chat=document_chat, evidence=evidence)
 
     def _cached_search(self, query: str, *, question: dict | None = None) -> dict:
         """Retrieve once per query and reuse the result.
@@ -175,6 +176,10 @@ class InterviewService:
         return result
 
     def _search_question(self, question: dict) -> dict:
+        if self.evidence is not None:
+            prebuilt = self.evidence.lookup(question)
+            if prebuilt is not None:
+                return prebuilt
         return self._cached_search(question["retrieval_query"], question=question)
 
     def _step(self, state: State, owner: str, answer_text: str | None = None) -> tuple[State, dict]:
@@ -194,6 +199,16 @@ class InterviewService:
     def list(self, owner: str = "") -> list[dict]:
         with self._lock:
             return self._store.list(owner)
+
+    def purge_older_than(self, days: int) -> int:
+        """Data retention: delete interviews not updated for `days` days (0 = keep everything)."""
+        if days <= 0:
+            return 0
+        with self._lock:
+            removed = self._store.delete_not_updated_since(datetime.now(timezone.utc) - timedelta(days=days))
+        if removed:
+            logger.info("Retention: deleted %d interview(s) not updated for %d days", removed, days)
+        return removed
 
     def rename(self, interview_id: str, title: str, *, owner: str = "") -> dict:
         with self._lock:
@@ -470,11 +485,13 @@ class InterviewService:
             self._save(owner, interview)
             return {"state": snapshot(state)}
 
-    def decide(self, interview_id: str, approve: bool, note: str = "", *, owner: str = "") -> dict:
+    def decide(self, interview_id: str, approve: bool, note: str = "", *, owner: str = "",
+               reviewer: str = "") -> dict:
         """Record the preparer's decision on the summary.
 
         Allowed only while status is "waiting_for_preparer" (else InterviewClosed).
-        Sets status to "approved" or "returned" and appends {"decision", "note"} to history.
+        Sets status to "approved" or "returned" and appends {"decision", "note"} to history,
+        plus "by": reviewer when a preparer is signed in (public mode).
         Returns {"state": snapshot}.
         """
         with self._lock:
@@ -483,7 +500,7 @@ class InterviewService:
             if state.status != "waiting_for_preparer":
                 raise InterviewClosed(f"Interview is {state.status}, not waiting for the preparer")
             state.status = "approved" if approve else "returned"
-            state.history.append({"decision": state.status, "note": note})
+            state.history.append({"decision": state.status, "note": note} | ({"by": reviewer} if reviewer else {}))
             interview.output = interview.output | {"status": state.status}
             self._save(owner, interview)
             return {"state": snapshot(state)}
@@ -548,10 +565,10 @@ class InterviewService:
                 raise InterviewClosed("Finish the interview before downloading its summary.")
         return {"state": snapshot(interview.state), "title": record["title"], "created_at": record["created_at"]}
 
-    def preparer_decide(self, interview_id: str, approve: bool, note: str = "") -> dict:
+    def preparer_decide(self, interview_id: str, approve: bool, note: str = "", *, reviewer: str = "") -> dict:
         """The preparer's decision on an interview of any owner (see decide)."""
         with self._lock:
             found = self._store.find(interview_id)
         if found is None:
             raise InterviewNotFound(interview_id)
-        return self.decide(interview_id, approve, note, owner=found["owner"])
+        return self.decide(interview_id, approve, note, owner=found["owner"], reviewer=reviewer)

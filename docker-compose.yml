@@ -1,0 +1,53 @@
+# Tax Agent on one server. See docs/deploy.md.
+#   docker compose up -d                          app only (prebuilt guide passages, no live retrieval)
+#   docker compose --profile retrieval up -d      + Ollama, for the chat page and tax questions mid-interview
+#   docker compose --profile https up -d          + Caddy with an automatic HTTPS certificate for $DOMAIN
+# Profiles combine: docker compose --profile retrieval --profile https up -d
+services:
+  app:
+    build: .
+    image: tax-agent:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TAX_AGENT_MODE: ${TAX_AGENT_MODE:-public}
+      OLLAMA_BASE_URL: ${COMPOSE_OLLAMA_URL:-http://ollama:11434}
+    volumes:
+      - interviews:/data
+    ports:
+      - "127.0.0.1:8000:8000"   # only the server itself; the public comes in through Caddy
+
+  ollama:
+    profiles: ["retrieval"]
+    image: ollama/ollama:0.12.6
+    restart: unless-stopped
+    volumes:
+      - ollama:/root/.ollama
+
+  ollama-pull:   # one-off: download the embedding model the knowledge base was built with
+    profiles: ["retrieval"]
+    image: ollama/ollama:0.12.6
+    depends_on: [ollama]
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["ollama", "pull", "${OLLAMA_EMBEDDING_MODEL:-qwen3-embedding:0.6b}"]
+    restart: "no"
+
+  caddy:
+    profiles: ["https"]
+    image: caddy:2.10.2
+    restart: unless-stopped
+    depends_on: [app]
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy:/data
+
+volumes:
+  interviews:
+  ollama:
+  caddy:

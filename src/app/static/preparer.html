@@ -228,6 +228,7 @@
   }
   async function api(path, body) {
     const res = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+    if (res.status === 401 || res.status === 403) { location.href = '/login?next=' + encodeURIComponent(location.pathname); }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
     return data;

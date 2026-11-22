@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tax Agent: Sign in</title>
+  <link rel="stylesheet" href="/workspace.css">
+  <style>
+    [hidden] { display: none !important; }
+    body { background: var(--canvas); }
+    main {
+      min-height: calc(100dvh - var(--nav-height)); display: grid; place-items: center;
+      padding: 24px 16px;
+    }
+    .card {
+      width: min(100%, 420px); padding: 28px clamp(18px, 5vw, 32px); background: var(--surface);
+      border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow);
+    }
+    h1 { margin: 0; font: 400 2.5rem/1 var(--serif); text-align: center; }
+    .lede { margin: 10px 0 20px; color: var(--muted); font-size: .875rem; text-align: center; }
+    .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; background: var(--tint); border-radius: 10px; }
+    .tabs button {
+      border: 0; border-radius: 7px; padding: 8px; font: inherit; font-size: .875rem; font-weight: 600;
+      background: transparent; color: var(--muted); cursor: pointer;
+    }
+    .tabs button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px #142c3e1a; }
+    form { display: grid; gap: 12px; margin-top: 18px; }
+    label { display: grid; gap: 6px; font-size: .875rem; font-weight: 600; }
+    input {
+      font: inherit; font-weight: 400; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
+      background: var(--surface); color: var(--ink);
+    }
+    input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .submit {
+      border: 0; border-radius: 8px; padding: 10px 14px; font: inherit; font-weight: 600;
+      background: var(--accent); color: white; cursor: pointer;
+    }
+    .submit:hover { background: var(--accent-hover); }
+    .submit:disabled { opacity: .6; cursor: default; }
+    #status { min-height: 1.25em; margin: 12px 0 0; font-size: .875rem; color: #88352e; text-align: center; }
+    .note { margin: 18px 0 0; color: var(--muted); font-size: .75rem; line-height: 1.5; text-align: center; }
+  </style>
+</head>
+<body>
+<nav class="product-nav" aria-label="Workspace">
+  <div class="product-nav-inner"></div>
+</nav>
+<main>
+  <section class="card" aria-labelledby="title">
+    <h1 id="title">Tax Agent</h1>
+    <p class="lede">Sign in to start a guided tax intake interview.</p>
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" id="tab-invite" aria-selected="true" aria-controls="invite-form">Invite code</button>
+      <button type="button" role="tab" id="tab-preparer" aria-selected="false" aria-controls="preparer-form">Preparer</button>
+    </div>
+    <form id="invite-form" role="tabpanel" aria-labelledby="tab-invite">
+      <label>Invite code <input name="invite_code" autocomplete="off" required autofocus></label>
+      <button class="submit" type="submit">Continue</button>
+    </form>
+    <form id="preparer-form" role="tabpanel" aria-labelledby="tab-preparer" hidden>
+      <label>Username <input name="username" autocomplete="username" required></label>
+      <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+      <button class="submit" type="submit">Sign in</button>
+    </form>
+    <p id="status" role="alert"></p>
+    <p class="note">Demo service: use fictional client information only. This tool does not file returns or give final tax advice.</p>
+  </section>
+</main>
+<script>
+  const status = document.getElementById('status');
+  const next = new URLSearchParams(location.search).get('next') || '';
+  const safeNext = next.startsWith('/') && !next.startsWith('//') ? next : null;
+
+  function show(which) {
+    for (const name of ['invite', 'preparer']) {
+      document.getElementById('tab-' + name).setAttribute('aria-selected', String(name === which));
+      document.getElementById(name + '-form').hidden = name !== which;
+    }
+    status.textContent = '';
+    document.querySelector(`#${which}-form input`).focus();
+  }
+  document.getElementById('tab-invite').onclick = () => show('invite');
+  document.getElementById('tab-preparer').onclick = () => show('preparer');
+  if (next.startsWith('/preparer')) show('preparer');
+
+  for (const form of document.querySelectorAll('form')) {
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const button = form.querySelector('button');
+      button.disabled = true; status.textContent = '';
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(Object.fromEntries(new FormData(form)))
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || `Sign-in failed (${res.status})`);
+        location.href = safeNext || (data.role === 'preparer' ? '/preparer' : '/interview');
+      } catch (err) {
+        status.textContent = err.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+  }
+</script>
+</body>
+</html>

@@ -6,8 +6,11 @@ api.py: FastAPI app.
     /api/chat         chat endpoint
     /api/playbooks, /api/interviews/...   guided interview endpoints (src/app/interviews.py)
     /preparer, /api/preparer/...         preparer review of every interview (web page and MCP)
+    /login, /api/login, /api/logout, /api/session   sign-in when TAX_AGENT_MODE=public (src/app/auth.py)
+    /healthz          liveness and which optional parts are on
 """
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 from copy import deepcopy
 from dataclasses import dataclass, field
 from hashlib import sha256
@@ -17,21 +20,25 @@ from secrets import token_urlsafe
 from pathlib import Path
 from threading import Lock
 from typing import Annotated
+from urllib.parse import quote
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 from starlette.formparsers import MultiPartException, MultiPartParser
 
 from src.agent import create_tax_agent
+from src.app import auth
 from src.app.documents import MAX_FILE_BYTES, MAX_FILES
 from src.app.interviews import (DocumentExtractionUnavailable, InvalidInterviewAnswer, InterviewClosed,
                                 InterviewNotFound, InterviewService, StagedDocumentUnavailable,
                                 list_playbooks)
 from src.app.interview_pdf import render_interview_pdf, render_review_pdf
+from src.app.limits import current_visitor, get_budget
+from src.config import app_settings
 from src.workflow.engine import INTAKE
 
 
@@ -63,8 +70,12 @@ async def lifespan(app: FastAPI):
     """Create the chat agent and the interview service at startup.
 
     If the chat agent cannot be created (e.g. no OPENAI_API_KEY), only /api/chat is
-    disabled (503); the guided interview still works.
+    disabled (503); the guided interview still works. A public site with missing sign-in
+    settings refuses to start (auth.check_public_settings).
     """
+    app.state.settings = app_settings()
+    auth.check_public_settings(app.state.settings)
+    app.state.login_attempts = auth.LoginAttempts()
     try:
         app.state.agent = create_tax_agent()
     except Exception as exc:
@@ -73,10 +84,130 @@ async def lifespan(app: FastAPI):
     app.state.interviews = InterviewService.from_env()
     app.state.sessions = {}
     app.state.sessions_lock = Lock()
+    retention = asyncio.create_task(_retention_loop(app.state.interviews, app.state.settings.retention_days))
     yield
+    retention.cancel()
+    with suppress(asyncio.CancelledError):
+        await retention
+
+
+async def _retention_loop(service: InterviewService, days: int, every: float = 6 * 60 * 60):
+    """Delete old interviews at startup and every few hours (TAX_AGENT_RETENTION_DAYS; 0 = never)."""
+    if days <= 0:
+        return
+    while True:
+        try:
+            await run_in_threadpool(service.purge_older_than, days)
+        except Exception:
+            logger.exception("Retention cleanup failed")
+        await asyncio.sleep(every)
 
 
 app = FastAPI(title="Tax Agent Chat", lifespan=lifespan)
+
+STATIC = Path(__file__).parent / "static"
+OPEN_PATHS = {"/login", "/api/login", "/api/logout", "/api/session", "/healthz", "/workspace.css",
+              "/interview/inter-variable.woff2", "/interview/instrument-serif.ttf"}
+
+
+def _needs_preparer(path: str) -> bool:
+    return path == "/preparer" or path.startswith("/api/preparer/")
+
+
+@app.middleware("http")
+async def access_control(request: Request, call_next):
+    """Public mode: every page and API needs a session; /preparer needs a preparer session.
+
+    OPEN_PATHS (sign-in, health check, fonts, stylesheet) are reachable without signing in.
+
+    Pages redirect to /login; API calls get 401 (not signed in) or 403 (not a preparer).
+    The session is kept on request.state.session (None in local mode). Every request is also
+    tagged with its visitor, whom model calls are counted against (src/app/limits.py).
+    """
+    settings = request.app.state.settings
+    path = request.url.path
+    request.state.session = None
+    if settings.public and path not in OPEN_PATHS:
+        session = auth.session_from(settings, request.cookies.get(auth.SESSION_COOKIE))
+        if session is None or (_needs_preparer(path) and not session.is_preparer):
+            if path.startswith("/api/"):
+                if session is None:
+                    return JSONResponse({"detail": "Sign in to continue."}, status_code=401)
+                return JSONResponse({"detail": "Preparer sign-in required."}, status_code=403)
+            return RedirectResponse("/login?next=" + quote(path), status_code=303)
+        request.state.session = session
+    token = current_visitor.set(_visitor(request))
+    try:
+        return await call_next(request)
+    finally:
+        current_visitor.reset(token)
+
+
+def _visitor(request: Request) -> str:
+    """This browser (its interview cookie), else its address."""
+    return interview_owner(request) or "ip:" + (request.client.host if request.client else "unknown")
+
+
+class LoginRequest(BaseModel):
+    """Body of POST /api/login: an invite code, or a preparer's username and password."""
+    invite_code: str = Field(default="", max_length=200)
+    username: str = Field(default="", max_length=100)
+    password: str = Field(default="", max_length=200)
+
+
+LOCAL_SESSION = {"mode": "local", "role": "preparer", "name": "local"}
+
+
+@app.get("/login", response_class=FileResponse, include_in_schema=False)
+def login_page():
+    return FileResponse(STATIC / "login.html", headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/login")
+def login(payload: LoginRequest, request: Request, response: Response):
+    """Sign in (public mode); sets the session cookie. 401 wrong code or password, 429 too many failures."""
+    settings = request.app.state.settings
+    if not settings.public:
+        return LOCAL_SESSION
+    ip = request.client.host if request.client else "unknown"
+    attempts = request.app.state.login_attempts
+    if attempts.blocked(ip):
+        raise HTTPException(429, "Too many failed sign-ins. Try again in 15 minutes.")
+    if payload.username:
+        session = auth.check_password(settings, payload.username, payload.password)
+    else:
+        session = auth.check_invite(settings, payload.invite_code)
+    if session is None:
+        attempts.fail(ip)
+        raise HTTPException(401, "That sign-in did not work.")
+    response.set_cookie(auth.SESSION_COOKIE, auth.sign(settings, session), max_age=auth.SESSION_SECONDS,
+                        httponly=True, samesite="lax", secure=request.url.scheme == "https")
+    return {"mode": "public", "role": session.role, "name": session.name}
+
+
+@app.post("/api/logout", status_code=204)
+def logout():
+    response = Response(status_code=204)
+    response.delete_cookie(auth.SESSION_COOKIE)
+    return response
+
+
+@app.get("/api/session")
+def current_session(request: Request):
+    """Who is signed in: {"mode", "role", "name"} (role None if nobody)."""
+    settings = request.app.state.settings
+    if not settings.public:
+        return LOCAL_SESSION
+    session = auth.session_from(settings, request.cookies.get(auth.SESSION_COOKIE))
+    return {"mode": "public", "role": session.role if session else None, "name": session.name if session else None}
+
+
+@app.get("/healthz", include_in_schema=False)
+def healthz(request: Request):
+    service = request.app.state.interviews
+    return {"status": "ok", "mode": "public" if request.app.state.settings.public else "local",
+            "llm": service.normalizer is not None, "chat": request.app.state.agent is not None,
+            "guide_passages": len(service.evidence) if service.evidence is not None else 0}
 
 
 class ChatRequest(BaseModel):
@@ -114,7 +245,9 @@ def chat(payload: ChatRequest, request: Request):
     a failed turn does not change the saved history."""
     state = request.app.state
     if state.agent is None:
-        raise HTTPException(503, "Chat is not configured. Set OPENAI_API_KEY and restart.")
+        raise HTTPException(503, "Chat is not configured. Set LLM_API_KEY and restart.")
+    if not get_budget().take(current_visitor.get()):
+        raise HTTPException(429, "The daily limit for questions has been reached. Please try again tomorrow.")
     session_id = payload.session_id or uuid4()
     with state.sessions_lock:
         if payload.session_id is not None:
@@ -417,7 +550,9 @@ def preparer_get(interview_id: str, request: Request):
 def preparer_decide(interview_id: str, payload: DecisionRequest, request: Request):
     """Approve or return any interview waiting for the preparer (409 otherwise)."""
     try:
-        result = request.app.state.interviews.preparer_decide(interview_id, payload.approve, payload.note)
+        session = request.state.session
+        result = request.app.state.interviews.preparer_decide(interview_id, payload.approve, payload.note,
+                                                              reviewer=session.name if session else "")
     except InterviewNotFound:
         raise HTTPException(404, "Interview not found.") from None
     except InterviewClosed as exc:

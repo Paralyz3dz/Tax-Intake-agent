@@ -536,6 +536,7 @@
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
       })
     });
+    if (res.status === 401) { location.href = '/login?next=' + encodeURIComponent(location.pathname); }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail ? (typeof data.detail === 'string' ? data.detail : 'Invalid input') : `Request failed (${res.status})`);
     return data;

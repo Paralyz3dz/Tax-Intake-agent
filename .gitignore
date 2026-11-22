@@ -8,6 +8,8 @@ logs/*
 !logs/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+# Prebuilt guide passages: public IRS/FTB text only, shipped with the service
+!data/processed/guide_evidence.json
 .pytest_cache/
 
 # MCP server interview summaries

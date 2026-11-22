@@ -132,6 +132,13 @@ Results include each chunk's ID, stored citation, text, and RRF fusion `score`.
 These scores are not confidence probabilities. The agent is instructed to cite
 the returned sources and say when the passages do not support an answer.
 
+## Deploying
+
+To run the service as a public website (sign-in with invite codes and preparer accounts,
+daily model-call caps, HTTPS, Docker), see [docs/deploy.md](docs/deploy.md). The model
+provider is configurable (`LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`): OpenAI, any
+OpenAI-compatible service, or a local model.
+
 ## Web chat
 
 With the same `.env`, PostgreSQL embeddings, and running Ollama instance used by

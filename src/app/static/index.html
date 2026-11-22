@@ -90,6 +90,13 @@
           body: JSON.stringify({ session_id: sessionId, message })
         });
         if (!response.ok) {
+          if (response.status === 401) {
+            location.href = '/login?next=' + encodeURIComponent(location.pathname);
+            return;
+          }
+          if (response.status === 429) {
+            throw new Error('The daily limit for questions has been reached. Please try again tomorrow.');
+          }
           if (response.status === 404) {
             throw new Error('Session expired. Select New chat to continue.');
           }

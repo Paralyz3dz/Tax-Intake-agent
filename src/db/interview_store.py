@@ -144,6 +144,16 @@ class InterviewStore:
                   interview.version))
             return cursor.rowcount == 1
 
+    def delete_not_updated_since(self, cutoff: datetime) -> int:
+        """Delete interviews whose last change is before cutoff (data retention); returns how many.
+
+        updated_at is stored as a UTC ISO string, so comparing the strings compares the times.
+        """
+        with self._connection() as conn:
+            cursor = self._execute(conn, "DELETE FROM guided_interviews WHERE updated_at < ?",
+                                   (cutoff.astimezone(timezone.utc).isoformat(timespec="microseconds"),))
+            return cursor.rowcount
+
     def list_all(self, status: str | None = None, limit: int = 100) -> "list[dict]":
         """Interviews of every owner, newest first, for the preparer review page."""
         query = "SELECT interview_id, owner, status, created_at, updated_at, title, payload FROM guided_interviews"
