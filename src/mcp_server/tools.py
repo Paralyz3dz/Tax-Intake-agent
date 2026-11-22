@@ -23,6 +23,8 @@ import os
 from pathlib import Path
 
 from src.app.interviews import MCP_OWNER, InterviewClosed, InterviewNotFound, InterviewService
+from src.app.limits import get_budget
+from src.llm.client import set_call_guard
 from src.workflow.engine import INTAKE, ROOT, load_scenario, sections
 
 ANSWER_FORMAT = {
@@ -46,10 +48,15 @@ _service: InterviewService | None = None
 
 
 def get_service() -> InterviewService:
-    """The process-wide interview service, built on first use with our own model reader turned off."""
+    """The process-wide interview service, built on first use with our own model reader turned off.
+
+    The daily budget is installed as the model call guard of this process too, so the Listwise
+    reranking in live retrieval counts against TAX_AGENT_LLM_CALLS_PER_DAY.
+    """
     global _service
     if _service is None:
         os.environ["TAX_AGENT_LLM"] = "off"
+        set_call_guard(get_budget().charge)
         _service = InterviewService.from_env()
     return _service
 

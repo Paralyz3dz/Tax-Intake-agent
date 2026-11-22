@@ -97,9 +97,20 @@ Every model call made with the site's key counts against two daily limits (UTC d
 site. When a limit is reached, interviews keep working: free-text answers are refused with
 "enter the value directly", as when the model is switched off. The chat page answers 429.
 
-The caps count model calls, not messages. Exact answers (yes/no, amounts, options) use none.
-A free-text answer on the interview page uses up to two: one to tell an answer from a tax
-question, and one to read the answer. So 200 calls per visitor is about 100 free-text answers.
+The caps count model calls, not messages. Every call is counted: the interview's note reader,
+tax questions, document reading, the reranking step of live retrieval, and each call the chat
+agent makes. Exact answers (yes/no, amounts, options) and prebuilt guide passages use none.
+
+| What the visitor does | Model calls |
+|---|---|
+| Exact answer, or a question whose passages are prebuilt | 0 |
+| Free-text answer on the interview page | up to 2 (tell answer from question, read the answer) |
+| Tax question mid-interview | about 3 (classify, rerank, answer) |
+| One chat message | usually 3 (decide to search, rerank, answer) |
+
+So 200 calls per visitor is about 100 free-text answers or 60 chat messages. When the budget
+runs out during live retrieval, passages come back unranked instead of failing.
+The MCP server's process counts its reranking calls against the same caps.
 Also set a monthly budget in the provider's dashboard as a last line of defence.
 
 To avoid the site's key entirely, point `LLM_BASE_URL` at a self-hosted model, or set

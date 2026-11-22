@@ -1,9 +1,11 @@
 """
 limits.py: a daily cap on model calls, per visitor and for the whole site.
 
-metered(chat) wraps a chat function: past either cap it raises LLMUnavailable, which every
-caller already handles by falling back to rules-only behaviour (normalize.py, interview_qa.py,
-documents.py), so a spent budget never breaks an interview.
+DailyBudget.charge is installed as the call guard of src/llm/client.py, so it runs before
+every model call the web service makes: chat_json() (note reader, tax questions, document
+reading, listwise reranking in live retrieval) and the chat agent's model. Past either cap it
+raises LLMUnavailable, which every caller already handles by falling back (rules-only answers,
+unranked retrieval), so a spent budget never breaks an interview.
 
 Who the visitor is comes from current_visitor, which api.py sets per request (the browser's
 interview cookie, or its IP address). Counters live in this process's memory: run the web
@@ -32,15 +34,22 @@ class DailyBudget:
         self._total = 0
         self._by_visitor: dict[str, int] = {}
 
-    def take(self, visitor: str) -> bool:
-        """Count one call for visitor; False (and nothing counted) if either cap is reached.
+    def _roll_day(self) -> None:
+        """Start counting again at 0 when the UTC date changes (call with the lock held)."""
+        today = datetime.fromtimestamp(self._clock(), timezone.utc).date().isoformat()
+        if today != self._day:
+            self._day, self._total, self._by_visitor = today, 0, {}
 
-        The counts start again at 0 when the UTC date changes.
-        """
+    def allows(self, visitor: str) -> bool:
+        """Whether visitor could make one more call now, without counting it."""
         with self._lock:
-            today = datetime.fromtimestamp(self._clock(), timezone.utc).date().isoformat()
-            if today != self._day:
-                self._day, self._total, self._by_visitor = today, 0, {}
+            self._roll_day()
+            return self._total < self.per_day and self._by_visitor.get(visitor, 0) < self.per_visitor
+
+    def take(self, visitor: str) -> bool:
+        """Count one call for visitor; False (and nothing counted) if either cap is reached."""
+        with self._lock:
+            self._roll_day()
             used = self._by_visitor.get(visitor, 0)
             if self._total >= self.per_day or used >= self.per_visitor:
                 return False
@@ -48,13 +57,10 @@ class DailyBudget:
             self._by_visitor[visitor] = used + 1
             return True
 
-    def metered(self, chat):
-        """chat, with the budget of current_visitor checked before every call."""
-        def wrapper(*args, **kwargs):
-            if not self.take(current_visitor.get()):
-                raise LLMUnavailable("daily model limit reached")
-            return chat(*args, **kwargs)
-        return wrapper
+    def charge(self) -> None:
+        """The call guard: count one call for current_visitor, or raise LLMUnavailable."""
+        if not self.take(current_visitor.get()):
+            raise LLMUnavailable("daily model limit reached")
 
 
 _budget: DailyBudget | None = None
@@ -62,8 +68,8 @@ _budget_lock = Lock()
 
 
 def get_budget() -> DailyBudget:
-    """The process-wide budget (shared by the interview service and the chat page),
-    created from settings on first use."""
+    """The process-wide budget (shared by the interview service, the chat page and the MCP
+    server's process), created from settings on first use."""
     global _budget
     with _budget_lock:
         if _budget is None:

@@ -4,14 +4,19 @@ client.py: the only place in the project that talks to an LLM provider.
 Everything else calls chat_json() and never imports a provider SDK. Any OpenAI-compatible
 server works (OpenAI, OpenRouter, DeepSeek, Azure, a local Ollama or vLLM): set LLM_BASE_URL,
 LLM_API_KEY and LLM_EXTRACT_MODEL (see src/config.py; the old OPENAI_* names still work).
+
+A call guard (set_call_guard) runs before every model call: the web service installs the daily
+budget there (src/app/limits.py). Offline scripts install none, so they are never limited.
 """
 from __future__ import annotations
 
 from base64 import b64encode
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 import json
 
 from src.config import llm_settings
+
+_call_guard: Callable[[], None] | None = None
 
 
 class LLMUnavailable(RuntimeError):
@@ -26,6 +31,21 @@ def is_configured() -> bool:
     return llm_settings().configured
 
 
+def set_call_guard(guard: Callable[[], None] | None) -> None:
+    """Install a function to run before every model call (None removes it).
+
+    The guard raises LLMUnavailable to refuse a call; the request is then never sent.
+    """
+    global _call_guard
+    _call_guard = guard
+
+
+def check_call_guard() -> None:
+    """Run the installed guard, if any. chat_json() and the chat agent's model call this first."""
+    if _call_guard is not None:
+        _call_guard()
+
+
 def chat_json(system: str, user: str, model: str | None = None, timeout: float = 30, *,
               images: Sequence[tuple[str, bytes]] = (), response_format: dict | None = None,
               max_completion_tokens: int | None = None) -> dict:
@@ -33,8 +53,10 @@ def chat_json(system: str, user: str, model: str | None = None, timeout: float =
 
     The request uses temperature 0 and JSON mode, so the reply must be a JSON object.
     The openai package is imported only here, at call time, so tests and rules-only
-    runs do not need it installed. Any failure is raised as LLMUnavailable.
+    runs do not need it installed. Any failure is raised as LLMUnavailable, including a
+    call refused by the call guard.
     """
+    check_call_guard()
     settings = llm_settings()
     if not settings.configured:
         raise LLMUnavailable("No model configured: set LLM_API_KEY (or OPENAI_API_KEY) or LLM_BASE_URL")

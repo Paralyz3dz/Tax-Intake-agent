@@ -134,19 +134,18 @@ class InterviewService:
         """Build the service from settings (src/config.py): real retrieval unless
         TAX_AGENT_RETRIEVAL=off, model calls if a model is configured and TAX_AGENT_LLM is not off.
 
-        One metered chat serves the note reader, tax questions and document reading, so every
-        model call counts against the visitor's and the site's daily cap (src/app/limits.py)."""
+        Every model call goes through chat_json(), whose call guard counts it against the
+        daily budget (installed by api.py, see src/app/limits.py)."""
         settings = app_settings()
         search = None if settings.retrieval_enabled else _no_search
         normalizer = None
         document_chat = None
         if settings.llm_enabled:
-            from src.app.limits import get_budget
-            from src.llm.client import chat_json, is_configured
+            from src.llm.client import chat_json
             from src.llm.normalize import make_normalizer
-            if is_configured():
-                document_chat = get_budget().metered(chat_json)
-                normalizer = make_normalizer(chat=document_chat)
+            normalizer = make_normalizer()
+            if normalizer is not None:
+                document_chat = chat_json
         logger.info("Interview service: retrieval=%s, llm=%s",
                     "off" if search else "on", "on" if normalizer else "off")
         store = InterviewStore(path=settings.interview_db_path, postgres_url=settings.interview_database_url)

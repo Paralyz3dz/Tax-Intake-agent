@@ -1,6 +1,8 @@
 """Public-site protections: sign-in (src/app/auth.py), the model-call cap (src/app/limits.py),
 data retention, and the access rules api.py applies when TAX_AGENT_MODE=public."""
 from datetime import datetime, timedelta, timezone
+import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
@@ -12,7 +14,8 @@ from src.app.api import app
 from src.app.interviews import InterviewService
 from src.app.limits import DailyBudget
 from src.config import AppSettings, app_settings
-from src.llm.client import LLMUnavailable
+from src.llm import client as client_module
+from src.llm.client import LLMUnavailable, chat_json, set_call_guard
 from src.llm.normalize import make_normalizer
 
 SECRET = "s" * 40
@@ -85,29 +88,104 @@ def test_budget_caps_each_visitor_and_the_whole_site_and_resets_daily():
     assert b.take("c")
 
 
-def test_metered_chat_raises_llm_unavailable_past_the_cap():
-    """Past the cap the wrapper raises LLMUnavailable and never calls the provider."""
-    calls = []
-    chat = DailyBudget(per_visitor=1, per_day=10).metered(lambda *a: calls.append(a) or {"ok": 1})
+@pytest.fixture
+def guard():
+    """Install a budget as the model call guard for one test, and remove it afterwards."""
+    def install(budget):
+        set_call_guard(budget.charge)
+        return budget
+    yield install
+    set_call_guard(None)
+
+
+@pytest.fixture
+def fake_openai(monkeypatch):
+    """A configured local model whose SDK is faked; returns the list of requests that were sent."""
+    sent = []
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+        def create(self, **kwargs):
+            sent.append(kwargs)
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='{"value": "single"}'))])
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:11434/v1")
+    return sent
+
+
+def test_guard_refuses_calls_past_the_cap_before_anything_is_sent(guard, fake_openai):
+    """chat_json() asks the guard first: the refused call never reaches the provider."""
+    guard(DailyBudget(per_visitor=1, per_day=10))
     token = limits.current_visitor.set("v1")
     try:
-        assert chat("sys", "user") == {"ok": 1}
-        with pytest.raises(LLMUnavailable):
-            chat("sys", "user")
+        assert chat_json("sys", "user") == {"value": "single"}
+        with pytest.raises(LLMUnavailable, match="daily model limit"):
+            chat_json("sys", "user")
     finally:
         limits.current_visitor.reset(token)
-    assert len(calls) == 1
+    assert len(fake_openai) == 1
 
 
-def test_spent_budget_falls_back_to_rules_instead_of_breaking_the_interview():
+def test_without_a_guard_calls_are_not_limited(fake_openai):
+    """Offline scripts (guide_evidence build) install no guard, so they are never refused."""
+    set_call_guard(None)
+    for _ in range(3):
+        chat_json("sys", "user")
+    assert len(fake_openai) == 3
+
+
+def test_allows_checks_without_counting():
+    b = DailyBudget(per_visitor=1, per_day=10)
+    assert b.allows("v") and b.allows("v")
+    assert b.take("v")
+    assert not b.allows("v")
+
+
+def test_listwise_rerank_is_counted(guard, fake_openai):
+    """Live retrieval's rerank goes through chat_json, so a spent budget refuses it too
+    (the retriever then falls back to unranked passages)."""
+    from src.rag.listwise import rank_listwise
+    guard(DailyBudget(per_visitor=0, per_day=0))
+    matches = [{"chunk_id": "a", "text": "one"}, {"chunk_id": "b", "text": "two"}]
+    with pytest.raises(LLMUnavailable):
+        rank_listwise("query", matches, {}, tax_year=2025, k=2)
+    assert fake_openai == []
+
+
+def test_chat_agent_model_calls_are_counted(guard):
+    """The agent's model runs CallGuard before every call; past the cap the call is stopped."""
+    from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+    from src.agent import CallGuard
+    guard(DailyBudget(per_visitor=1, per_day=10))
+    model = GenericFakeChatModel(messages=iter([AIMessage(content="a"), AIMessage(content="b")]),
+                                 callbacks=[CallGuard()])
+    assert model.invoke("first").content == "a"
+    with pytest.raises(LLMUnavailable):
+        model.invoke("second")
+
+
+def test_create_tax_agent_attaches_the_guard(monkeypatch):
+    import src.agent as agent_module
+    seen = {}
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:11434/v1")
+    monkeypatch.setattr(agent_module, "ChatOpenAI", lambda **kwargs: seen.update(kwargs) or "model")
+    monkeypatch.setattr(agent_module, "create_agent", lambda **kwargs: "agent")
+    agent_module.create_tax_agent()
+    assert any(isinstance(cb, agent_module.CallGuard) for cb in seen["callbacks"])
+
+
+def test_spent_budget_falls_back_to_rules_instead_of_breaking_the_interview(guard, fake_openai):
     """With no budget left, free text is refused but exact answers still move the interview on."""
-    spent = DailyBudget(per_visitor=0, per_day=0)
-    svc = InterviewService(search=lambda q: {"matches": []},
-                           normalizer=make_normalizer(chat=spent.metered(lambda s, u: {"value": "single"})))
+    guard(DailyBudget(per_visitor=0, per_day=0))
+    svc = InterviewService(search=lambda q: {"matches": []}, normalizer=make_normalizer(chat=chat_json))
     iid = svc.start("ca_w2_side_gig")["state"]["interview_id"]
     out = svc.answer(iid, "she is not married")["output"]
     assert out["type"] == "error" and "enter the value directly" in out["message"]
     assert svc.answer(iid, "single")["output"]["type"] == "question"
+    assert fake_openai == []
 
 
 def test_retention_deletes_only_stale_interviews():
@@ -180,10 +258,28 @@ def test_repeated_failed_sign_ins_are_blocked(site):
     assert site.post("/api/login", json={"invite_code": "demo-1"}).status_code == 429
 
 
-def test_chat_stops_at_the_visitor_budget(site):
+def test_app_installs_the_guard_only_while_it_runs(monkeypatch):
+    monkeypatch.setattr("src.app.api.app_settings", lambda: settings(public=False))
+    with patch("src.app.api.create_tax_agent", return_value=MagicMock()), \
+         patch.object(InterviewService, "from_env", classmethod(lambda cls: cls(search=lambda q: {"matches": []}))):
+        with TestClient(app):
+            assert client_module._call_guard is not None
+    assert client_module._call_guard is None
+
+
+def test_chat_refuses_when_the_budget_is_already_spent(site):
+    """A spent budget answers 429 before the agent runs."""
     site.post("/api/login", json={"invite_code": "demo-1"})
-    codes = [site.post("/api/chat", json={"message": "hi"}).status_code for _ in range(3)]
-    assert codes == [200, 200, 429]
+    limits._budget.per_visitor = 0
+    assert site.post("/api/chat", json={"message": "hi"}).status_code == 429
+    app.state.agent.invoke.assert_not_called()
+
+
+def test_chat_answers_429_when_the_budget_runs_out_mid_answer(site):
+    """The guard stops one of the agent's model calls: the turn ends with 429, not 502."""
+    site.post("/api/login", json={"invite_code": "demo-1"})
+    app.state.agent.invoke.side_effect = LLMUnavailable("daily model limit reached")
+    assert site.post("/api/chat", json={"message": "hi"}).status_code == 429
 
 
 def test_logout_ends_the_session(site):
