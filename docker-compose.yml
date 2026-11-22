@@ -12,6 +12,7 @@ services:
     environment:
       TAX_AGENT_MODE: ${TAX_AGENT_MODE:-public}
       OLLAMA_BASE_URL: ${COMPOSE_OLLAMA_URL:-http://ollama:11434}
+      TAX_AGENT_INTERVIEW_DB_PATH: /data/interviews.sqlite3   # always on the volume, even if .env sets it
     volumes:
       - interviews:/data
     ports:

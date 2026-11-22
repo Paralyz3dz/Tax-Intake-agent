@@ -68,8 +68,11 @@ _budget_lock = Lock()
 
 
 def get_budget() -> DailyBudget:
-    """The process-wide budget (shared by the interview service, the chat page and the MCP
-    server's process), created from settings on first use."""
+    """This process's budget, created from settings on first use.
+
+    In the web app it is shared by the interview service and the chat page. The MCP server
+    runs in its own process and so has its own budget with the same limits.
+    """
     global _budget
     with _budget_lock:
         if _budget is None:
