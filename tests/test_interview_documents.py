@@ -11,7 +11,7 @@ from reportlab.pdfgen.canvas import Canvas
 from src.app.api import app
 from src.app.documents import MAX_FILE_BYTES, MAX_FILES, TAX_YEAR
 from src.app.interviews import InterviewService
-from src.llm.interview_qa import ANSWER, CLASSIFY
+from src.llm.interview_qa import CLASSIFY, REVIEW
 
 
 @pytest.fixture
@@ -94,6 +94,7 @@ def sync(client, path, *document_ids):
 def test_tax_question_uses_its_own_sources_and_sends_the_attachment(client, document_answers_current_question):
     service = app.state.interviews
     query = "2025 IRS definition of self-employment income"
+    follow_up = "2025 IRS examples of self-employment income"
     passage = {"citation": "IRS test source", "text": "Example evidence about self-employment."}
     message = "Please explain what counts as self-employment"
     response_text = "An explanation based on the retrieved passage."
@@ -104,11 +105,16 @@ def test_tax_question_uses_its_own_sources_and_sends_the_attachment(client, docu
         if system == CLASSIFY:
             assert request["interview_question"] == started["output"]["question"]
             return {"kind": "tax_question", "search_query": query}
-        assert system == ANSWER and request["passages"] == {"1": passage}
+        assert system == REVIEW
+        if request["previous_queries"] == [query]:
+            assert request["passages"] == {}
+            return {"answer": None, "sources": [], "next_query": follow_up}
+        assert request["previous_queries"] == [query, follow_up]
+        assert request["passages"] == {"1": passage}
         return {"answer": response_text, "sources": ["1"]}
 
     service.tax_chat = tax_chat
-    service.search = lambda text: {"matches": [passage] if text == query else []}
+    service.search = lambda text: {"matches": [passage] if text == follow_up else []}
     path, question_id = start(client)
     started = client.get(path).json()
     lines = ["Self-employment income: No"]
