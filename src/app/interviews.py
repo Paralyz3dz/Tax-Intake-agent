@@ -21,7 +21,7 @@ from uuid import uuid4
 from src.config import app_settings
 from src.app.documents import TAX_YEAR, extract_document_facts
 from src.db.interview_store import Interview, InterviewStore
-from src.llm.interview_qa import respond_to_question
+from src.llm.interview_qa import MAX_SEARCHES, respond_to_question
 from src.workflow.engine import (INTAKE, MODULES, PLAYBOOKS, apply_triggers, load_scenario, record_answer, review, undo, sections,
                                  start_interview, step, summarize)
 from src.workflow.guide_evidence import load as load_guide_evidence
@@ -254,7 +254,10 @@ class InterviewService:
                 from src.workflow.engine import _default_search
 
                 question_id = guide["question_id"]
-                tax_qa = respond_to_question(self.tax_chat, self.search or _default_search, guide, answer_text, TAX_YEAR)
+                tax_qa = respond_to_question(
+                    self.tax_chat, self.search or _default_search, guide, answer_text, TAX_YEAR,
+                    max_searches=1 if self.search is _no_search else MAX_SEARCHES,
+                )
 
         with self._lock:
             interview = self._get(interview_id, owner)
