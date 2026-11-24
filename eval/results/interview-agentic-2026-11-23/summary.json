@@ -1,0 +1,71 @@
+{
+  "cases": 32,
+  "modes": {
+    "single_pass": {
+      "answered": 32,
+      "abstained": 0,
+      "unavailable": 0,
+      "mean_searches": 1,
+      "mean_model_calls": 3,
+      "follow_up_cases": 0,
+      "retrieval_errors": 0,
+      "rerank_fallbacks": 0,
+      "latency_seconds": {
+        "mean": 7.606820231250822,
+        "median": 7.154747550011962,
+        "p95": 10.305400779996125
+      }
+    },
+    "agentic": {
+      "answered": 32,
+      "abstained": 0,
+      "unavailable": 0,
+      "mean_searches": 1.03125,
+      "mean_model_calls": 3.0625,
+      "follow_up_cases": 1,
+      "retrieval_errors": 0,
+      "rerank_fallbacks": 0,
+      "latency_seconds": {
+        "mean": 8.18211518750195,
+        "median": 7.417388649992063,
+        "p95": 12.646080325004004
+      }
+    }
+  },
+  "paired": {
+    "correctness": {
+      "cases": 32,
+      "single_pass_scored": 32,
+      "agentic_scored": 32,
+      "single_pass_mean": 0.859375,
+      "agentic_mean": 0.859375,
+      "agentic_wins": 0,
+      "ties": 32,
+      "agentic_losses": 0
+    },
+    "faithfulness": {
+      "cases": 32,
+      "single_pass_scored": 32,
+      "agentic_scored": 32,
+      "single_pass_mean": 0.9427083333333334,
+      "agentic_mean": 1.0,
+      "agentic_wins": 3,
+      "ties": 29,
+      "agentic_losses": 0
+    }
+  },
+  "run": {
+    "dataset_sha256": "edcf0d3c53d4355f656b51f79770ce17457ecfbc9a4d8da950d5f7ec2198e7dd",
+    "seed": 542,
+    "workers": 4,
+    "answer_model": "gpt-4o-mini",
+    "judge_model": "gpt-4.1-mini-2025-04-14",
+    "corpus_version": "rag_materials_v3",
+    "corpus_tax_year": 2025,
+    "rerank_method": "listwise",
+    "max_searches": {
+      "single_pass": 1,
+      "agentic": 3
+    }
+  }
+}

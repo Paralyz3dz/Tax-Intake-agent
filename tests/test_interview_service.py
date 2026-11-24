@@ -1,11 +1,12 @@
 """Interview service + model normalizer, without FastAPI, DB, Ollama or OpenAI."""
+import json
 import sqlite3
 
 import pytest
 
 from src.app.interviews import InterviewClosed, InterviewNotFound, InterviewService, list_playbooks
 from src.db.interview_store import InterviewStore
-from src.llm.interview_qa import ANSWER, CLASSIFY, NO_EVIDENCE, respond_to_question
+from src.llm.interview_qa import ANSWER, CLASSIFY, NO_EVIDENCE, REVIEW, respond_to_question
 from src.llm.normalize import make_normalizer
 
 
@@ -21,11 +22,82 @@ def test_tax_question_on_list_input_requires_supported_sources(matches):
     def chat(system, user):
         if system == CLASSIFY:
             return {"kind": "tax_question", "search_query": "Form 1099-K"}
-        assert matches and system == ANSWER
+        assert system == REVIEW
         return {"answer": "Unsupported answer", "sources": [2]}
 
     result = respond_to_question(chat, lambda query: {"matches": matches}, guide, "What is Form 1099-K?", 2025)
     assert result == {"answer": NO_EVIDENCE, "citations": []}
+
+
+@pytest.mark.parametrize("empty_first_search", [False, True])
+def test_tax_question_checks_combined_evidence_and_stops_when_answered(empty_first_search):
+    guide = {"fact": "forms", "input_type": "list", "options": [], "question": "Which forms did you receive?"}
+    first = {"citation": "IRS Publication 17", "text": "Evidence about the general rule."}
+    second = {"citation": "IRS Publication 17", "text": "Evidence about an exception."}
+    searches = []
+
+    def search(query):
+        searches.append(query)
+        return {"matches": ([] if empty_first_search else [first]) if len(searches) == 1 else [first, second]}
+
+    def chat(system, user):
+        if system == CLASSIFY:
+            return {"kind": "tax_question", "search_query": "general rule"}
+        assert system == REVIEW
+        request = json.loads(user)
+        assert request["previous_queries"] == searches
+        if len(searches) == 1:
+            return {"answer": None, "sources": [], "next_query": "rule exception"}
+        assert request["passages"] == {"1": first, "2": second}
+        return {"answer": "The general rule has an exception.", "sources": [1, "2", 1]}
+
+    result = respond_to_question(chat, search, guide, "Is there an exception?", 2025)
+    assert searches == ["general rule", "rule exception"]
+    assert result == {"answer": "The general rule has an exception.", "citations": [first, second]}
+
+
+@pytest.mark.parametrize(("duplicate", "expected_searches"), [(True, 1), (False, 3)])
+def test_tax_question_bounds_follow_up_searches(duplicate, expected_searches):
+    guide = {"fact": "forms", "input_type": "list", "options": [], "question": "Which forms did you receive?"}
+    searches, prompts = [], []
+
+    def search(query):
+        searches.append(query)
+        return no_search(query)
+
+    def chat(system, user):
+        prompts.append(system)
+        if system == CLASSIFY:
+            return {"kind": "tax_question", "search_query": "Tax rule"}
+        return {"answer": None, "sources": [], "next_query": " tax  rule? " if duplicate else f"exception {len(searches)}"}
+
+    assert respond_to_question(chat, search, guide, "Is there an exception?", 2025) == {
+        "answer": NO_EVIDENCE, "citations": [],
+    }
+    assert len(searches) == expected_searches
+    assert prompts == ([CLASSIFY, REVIEW] if duplicate else [CLASSIFY, REVIEW, REVIEW, ANSWER])
+
+
+def test_tax_question_keeps_evidence_when_follow_up_retrieval_fails():
+    guide = {"fact": "forms", "input_type": "list", "options": [], "question": "Which forms did you receive?"}
+
+    def search(query):
+        if query == "Exception":
+            raise RuntimeError("search unavailable")
+        return no_search(query)
+
+    def chat(system, user):
+        if system == CLASSIFY:
+            return {"kind": "tax_question", "search_query": "General rule"}
+        if system == REVIEW:
+            return {"answer": None, "sources": [], "next_query": "Exception"}
+        assert system == ANSWER
+        assert json.loads(user)["passages"] == {"1": no_search("General rule")["matches"][0]}
+        return {"answer": None, "sources": []}
+
+    assert respond_to_question(chat, search, guide, "Is there an exception?", 2025) == {
+        "answer": NO_EVIDENCE, "citations": [],
+    }
 
 
 def test_playbooks_are_listed():

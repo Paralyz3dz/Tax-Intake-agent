@@ -1,6 +1,6 @@
 # Knowledge base for the guided interview
 
-As of 2026-11-18. Tax year 2025, federal (IRS) and California (FTB).
+Corpus as of 2026-11-18. Tax year 2025, federal (IRS) and California (FTB).
 
 This file defines what goes into the retrieval knowledge base and in what format. The document
 list is derived from the interview playbook: every question in `playbooks/modules/*/questions.json`
@@ -45,13 +45,34 @@ The next table contains the supplied 122-question comparison. RRF, BGE and Listw
 
 The 104-question and 122-question results use different question sets and should not be treated as a single directly comparable series.
 
+### Guided interview Agentic RAG evaluation
+
+On 2026-11-23, a paired test used the live `rag_materials_v3` corpus to compare
+single-pass interview Q&A at `4d2d3f7` with adaptive retrieval on 32 tax-year
+2025 questions. Both modes used the same answering model and retrieval backend.
+An automated judge scored answer correctness and support from retrieved evidence.
+
+| Metric | Single-pass RAG | Agentic RAG |
+|---|---:|---:|
+| Mean answer correctness score | 85.94% | 85.94% |
+| Mean faithfulness score | 94.27% | 100.00% |
+| Median answer latency | 7.15 s | 7.42 s |
+| P95 answer latency | 10.31 s | 12.65 s |
+| Questions with follow-up retrieval | 0/32 | 1/32 |
+
+The correctness verdict matched for every pair. Three answers improved in
+faithfulness after their first retrieval. The single follow-up kept the same
+correctness verdict. The active corpus contains none of the 153 original gold
+chunk IDs, so the comparison omits ID-based Recall@5. See the
+[full run report and per-question artifacts](../eval/results/interview-agentic-2026-11-23/report.md).
+
 ## 1. What the knowledge base does, and does not do
 
 | Does | Does not |
 |---|---|
 | Return official passages for a question's `retrieval_query`, shown as evidence under the question | Decide the next question: that is code reading the playbook |
 | Let the engine check each playbook reference (`check_references`): found / not in the knowledge base / unchecked | Hold client documents or answers: nothing from a client ever enters this index |
-| Answer free-text rule questions with a citation (later) | Supply amounts and thresholds by similarity search: tables go to `tax_tables` for exact lookup |
+| Answer free-text rule questions with citations using adaptive retrieval | Supply amounts and thresholds by similarity search: tables go to `tax_tables` for exact lookup |
 
 If retrieval fails, the interview continues without passages and the error is shown; the knowledge
 base is never on the critical path.

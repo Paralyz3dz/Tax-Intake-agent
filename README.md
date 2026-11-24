@@ -167,6 +167,12 @@ python -m unittest discover -s tests -p test_chat_api.py
 
 ## Guided interview
 
+Ask tax questions directly in the interview reply box. The assistant searches official
+passages and uses up to two follow-up searches when the first results leave evidence gaps.
+It cites the passages it used or reports that the evidence is insufficient. See the
+[paired evaluation](eval/README.md#guided-interview-agentic-rag-comparison) for the comparison
+with single-pass retrieval.
+
 After starting an interview, select **+** beside the answer box to attach up to ten
 text-based PDFs, PNG images, JPG/JPEG images, or UTF-8 text files (10 MB each).
 Extraction begins when you select the files. While the files are processed, you can

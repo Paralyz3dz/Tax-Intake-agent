@@ -16,7 +16,36 @@ For the paired 104-query index/reference-block cleanup experiment, see
 For controlled 104-question intake candidate-pool comparisons, see
 [candidate_experiment.md](candidate_experiment.md).
 
-Run the current Agentic RAG baseline against the evaluation dataset:
+## Guided interview Agentic RAG comparison
+
+The [November 23, 2026 comparison](results/interview-agentic-2026-11-23/report.md)
+covers 32 paired questions with live retrieval.
+
+Run the previous single-pass and current adaptive interview Q&A on the same questions:
+
+```powershell
+python -m eval.run_agentic_comparison --limit 32 --workers 4 `
+  --judge-model gpt-4.1-mini-2025-04-14 --out eval/results/interview-agentic-repeat
+```
+
+Omit `--limit` to run all 200 cases. Limited runs sample across question types with
+the recorded seed. Both variants use the same interview context, classification
+prompt, answer model, and configured live HNSW/BM25 retriever and reranker. Single-pass
+uses one retrieval and the previous answer prompt from `4d2d3f7`. Agentic Q&A can
+review the evidence and retrieve up to three times. Pair order alternates. The runner
+records individual queries, returned chunk IDs, answers, judge verdicts, model calls,
+and latency before judging. `--judge-model` selects the model for both judges.
+
+Correctness and faithfulness use the rubrics below. Paired means include only cases
+with both scores for that metric, and the summary reports scored counts. Abstentions
+are graded for correctness and have no faithfulness score. The active corpus uses
+different chunk IDs from the benchmark's original Publication 17 index, so this run
+uses the reference answers for correctness without scoring ID-based recall. Use a
+fresh output directory for each run.
+
+## Historical free-form chat baseline
+
+Run the free-form chat agent against the same evaluation dataset:
 
 ```powershell
 .\.venv\Scripts\python.exe -m eval.run_baseline --workers 2
