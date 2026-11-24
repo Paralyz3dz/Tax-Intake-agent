@@ -1,0 +1,240 @@
+{
+  "id": "student_8843",
+  "title": "International student: Form 8843 only",
+  "status": "draft - questions copied from playbooks/modules (base_intake, student)",
+  "facts": [
+    {
+      "name": "is_us_citizen",
+      "type": "bool",
+      "required": true
+    },
+    {
+      "name": "has_green_card",
+      "type": "bool",
+      "required": true,
+      "ask_when": [
+        {
+          "fact": "is_us_citizen",
+          "equals": false
+        }
+      ]
+    },
+    {
+      "name": "student_visa_type",
+      "type": "enum",
+      "required": true,
+      "options": [
+        "f_visa",
+        "j_visa",
+        "m_visa",
+        "q_visa",
+        "other_visa"
+      ],
+      "ask_when": [
+        {
+          "fact": "is_us_citizen",
+          "equals": false
+        },
+        {
+          "fact": "has_green_card",
+          "equals": false
+        }
+      ]
+    },
+    {
+      "name": "visa_in_substantial_compliance",
+      "type": "bool",
+      "required": true,
+      "ask_when": [
+        {
+          "fact": "is_us_citizen",
+          "equals": false
+        },
+        {
+          "fact": "has_green_card",
+          "equals": false
+        }
+      ]
+    },
+    {
+      "name": "exempt_student_more_than_5_years",
+      "type": "bool",
+      "required": true,
+      "ask_when": [
+        {
+          "fact": "is_us_citizen",
+          "equals": false
+        },
+        {
+          "fact": "has_green_card",
+          "equals": false
+        }
+      ]
+    },
+    {
+      "name": "applied_for_green_card",
+      "type": "bool",
+      "required": true,
+      "ask_when": [
+        {
+          "fact": "is_us_citizen",
+          "equals": false
+        },
+        {
+          "fact": "has_green_card",
+          "equals": false
+        }
+      ]
+    }
+  ],
+  "escalation_rules": [
+    {
+      "id": "esc_nonresident_student_f",
+      "when": [
+        {
+          "fact": "student_visa_type",
+          "equals": "f_visa"
+        },
+        {
+          "fact": "exempt_student_more_than_5_years",
+          "equals": false
+        },
+        {
+          "fact": "visa_in_substantial_compliance",
+          "equals": true
+        }
+      ],
+      "reason": "Likely a nonresident alien (exempt student, Form 8843): Form 1040-NR needs a preparer certified in Foreign Student and Scholar tax law."
+    },
+    {
+      "id": "esc_nonresident_student_j",
+      "when": [
+        {
+          "fact": "student_visa_type",
+          "equals": "j_visa"
+        },
+        {
+          "fact": "exempt_student_more_than_5_years",
+          "equals": false
+        },
+        {
+          "fact": "visa_in_substantial_compliance",
+          "equals": true
+        }
+      ],
+      "reason": "Likely a nonresident alien (exempt student, Form 8843): Form 1040-NR needs a preparer certified in Foreign Student and Scholar tax law."
+    },
+    {
+      "id": "esc_nonresident_student_m",
+      "when": [
+        {
+          "fact": "student_visa_type",
+          "equals": "m_visa"
+        },
+        {
+          "fact": "exempt_student_more_than_5_years",
+          "equals": false
+        },
+        {
+          "fact": "visa_in_substantial_compliance",
+          "equals": true
+        }
+      ],
+      "reason": "Likely a nonresident alien (exempt student, Form 8843): Form 1040-NR needs a preparer certified in Foreign Student and Scholar tax law."
+    },
+    {
+      "id": "esc_student_visa_q",
+      "when": [
+        {
+          "fact": "student_visa_type",
+          "equals": "q_visa"
+        }
+      ],
+      "reason": "Q visa holders are outside the Foreign Student and Scholar volunteer scope; the preparer determines residency."
+    },
+    {
+      "id": "esc_student_visa_other",
+      "when": [
+        {
+          "fact": "student_visa_type",
+          "equals": "other_visa"
+        }
+      ],
+      "reason": "Not on an F, J, M or Q visa: the student is not an exempt individual and the substantial presence test applies; the preparer determines residency."
+    },
+    {
+      "id": "esc_visa_not_in_compliance",
+      "when": [
+        {
+          "fact": "visa_in_substantial_compliance",
+          "equals": false
+        }
+      ],
+      "reason": "Days cannot be excluded as an exempt student without substantial compliance with the visa; the preparer applies the substantial presence test."
+    },
+    {
+      "id": "esc_exempt_more_than_5_years",
+      "when": [
+        {
+          "fact": "exempt_student_more_than_5_years",
+          "equals": true
+        }
+      ],
+      "reason": "Exempt as a student in more than 5 calendar years: the student is likely a resident alien unless the Form 8843 line 13 exception applies; the preparer decides."
+    },
+    {
+      "id": "esc_applied_for_green_card",
+      "when": [
+        {
+          "fact": "applied_for_green_card",
+          "equals": true
+        }
+      ],
+      "reason": "Steps toward permanent residence can block the exempt-student exception and change residency; the preparer decides."
+    }
+  ],
+  "reminders": [
+    {
+      "id": "file_8843_f",
+      "when": [
+        {
+          "fact": "student_visa_type",
+          "equals": "f_visa"
+        },
+        {
+          "fact": "exempt_student_more_than_5_years",
+          "equals": false
+        }
+      ],
+      "text": "File Form 8843 for 2025 even with no U.S. income, and keep a copy; each F-2 or J-2 family member files their own Form 8843."
+    },
+    {
+      "id": "file_8843_j",
+      "when": [
+        {
+          "fact": "student_visa_type",
+          "equals": "j_visa"
+        },
+        {
+          "fact": "exempt_student_more_than_5_years",
+          "equals": false
+        }
+      ],
+      "text": "File Form 8843 for 2025 even with no U.S. income, and keep a copy; each F-2 or J-2 family member files their own Form 8843."
+    },
+    {
+      "id": "file_8843_m",
+      "when": [
+        {
+          "fact": "student_visa_type",
+          "equals": "m_visa"
+        },
+        {
+          "fact": "exempt_student_more_than_5_years",
+          "equals": false
+        }
+      ],
+      "text": "File Form 8843 for 2025 even with no U.S. income, and keep a copy; each F-2 or J-2 family member files their own Form 8843."
+    }
+  ]
+}

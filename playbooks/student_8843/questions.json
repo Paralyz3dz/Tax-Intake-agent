@@ -1,0 +1,75 @@
+[
+  {
+    "id": "q_is_us_citizen",
+    "fact": "is_us_citizen",
+    "question": "Were you a U.S. citizen for all of last year?",
+    "why_ask": "Non-citizens may be resident or nonresident aliens for tax purposes, which changes the return.",
+    "required_docs": [],
+    "retrieval_query": "resident alien nonresident alien who must file",
+    "source": "IRS Pub 17",
+    "origin": "Form 13614-C (Rev. 10-2025) Part I",
+    "status": "derived_official"
+  },
+  {
+    "id": "q_has_green_card",
+    "fact": "has_green_card",
+    "question": "Did you have a green card (lawful permanent resident status) at any time in 2025?",
+    "why_ask": "A green card holder is a resident alien for tax purposes and is taxed like a U.S. citizen; Form 8843 is for nonimmigrant visa holders.",
+    "required_docs": [
+      "green card"
+    ],
+    "retrieval_query": "lawful permanent resident green card test resident alien",
+    "source": "IRS Pub 519",
+    "origin": "Pub 4012 (Rev. 10-2026) Tab L, Substantial Presence Test Decision Chart 1 (Student) (structure only); Resident or Nonresident Alien Decision Tree step 1",
+    "status": "derived_official"
+  },
+  {
+    "id": "q_student_visa_type",
+    "fact": "student_visa_type",
+    "question": "What visa were you in the U.S. on as a student in 2025: F, J, M, Q, or another visa?",
+    "why_ask": "Students on F, J, M or Q visas can be exempt individuals whose days do not count for the substantial presence test (Form 8843, Part I line 1a and Part III).",
+    "required_docs": [
+      "passport",
+      "visa",
+      "I-20 or DS-2019",
+      "I-94 travel history"
+    ],
+    "retrieval_query": "exempt individual student F J M Q visa days not counted substantial presence test",
+    "source": "IRS Form 8843 Instructions",
+    "origin": "IRS Form 8843 (2025) Part I line 1a, Part III; Pub 4012 (Rev. 10-2026) Tab L, Substantial Presence Test Decision Chart 1 (Student) (structure only)",
+    "status": "derived_official"
+  },
+  {
+    "id": "q_visa_in_substantial_compliance",
+    "fact": "visa_in_substantial_compliance",
+    "question": "Did you follow the requirements of your student visa during 2025 (for example full-time enrollment and authorized work only)?",
+    "why_ask": "Days can be excluded as an exempt student only if the student substantially complied with the visa requirements (Pub 4012 Tab L, step 2).",
+    "required_docs": [],
+    "retrieval_query": "student exempt individual substantially complied with visa requirements",
+    "source": "IRS Form 8843 Instructions",
+    "origin": "Pub 4012 (Rev. 10-2026) Tab L, Substantial Presence Test Decision Chart 1 (Student) (structure only), step 2",
+    "status": "derived_official"
+  },
+  {
+    "id": "q_exempt_student_more_than_5_years",
+    "fact": "exempt_student_more_than_5_years",
+    "question": "Counting 2025, were you in the U.S. as a student, teacher or trainee (F, J, M or Q visa) during any part of more than 5 calendar years?",
+    "why_ask": "A student stops being an exempt individual after 5 calendar years unless an exception applies (Form 8843, Part III line 12).",
+    "required_docs": [],
+    "retrieval_query": "student exempt for more than 5 calendar years Form 8843 line 12",
+    "source": "IRS Form 8843 Instructions",
+    "origin": "IRS Form 8843 (2025) Part III line 12; Pub 4012 (Rev. 10-2026) Tab L, Substantial Presence Test Decision Chart 1 (Student) (structure only), step 3",
+    "status": "derived_official"
+  },
+  {
+    "id": "q_applied_for_green_card",
+    "fact": "applied_for_green_card",
+    "question": "During 2025, did you apply for, or take other steps toward, a green card (lawful permanent resident status)?",
+    "why_ask": "Steps toward permanent residence are asked on Form 8843 (Part III line 13) and can stop days from being excluded.",
+    "required_docs": [],
+    "retrieval_query": "applied for lawful permanent resident status Form 8843 student",
+    "source": "IRS Form 8843 Instructions",
+    "origin": "IRS Form 8843 (2025) Part III line 13",
+    "status": "derived_official"
+  }
+]

@@ -107,6 +107,13 @@ def get_interview(interview_id: str) -> dict:
     return tools.get_interview(interview_id)
 
 
+@mcp.tool(title="Form 8843 lines from the interview", annotations=READ_ONLY)
+def draft_form_8843(interview_id: str) -> dict:
+    """For an F, J or M student: which Form 8843 lines the interview settles, what needs the preparer,
+    and which details the client fills in themselves on the web form page. No personal details are needed."""
+    return tools.draft_form_8843(interview_id)
+
+
 @mcp.tool(title="Look up official IRS / FTB text", annotations=READ_ONLY)
 def lookup_official_text(query: str) -> dict:
     """Search official IRS / FTB passages (tax year 2025) to explain why a question is asked. Not client advice."""

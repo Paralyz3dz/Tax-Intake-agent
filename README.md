@@ -22,7 +22,7 @@ decides the next question in code, and calls retrieval and the LLM only at fixed
 | `src/rag/` | Embedding, vector search, reranking |
 | `src/workflow/` | Interview workflow engine: `engine.py`, `state.py`, `conditions.py` |
 | `src/llm/` | LLM adapter (`client.py`, the only provider call) and note reader (`normalize.py`) |
-| `src/app/` | FastAPI backend (`api.py`), interview service (`interviews.py`), chat page and interview page (`static/`) |
+| `src/app/` | FastAPI backend (`api.py`), interview service (`interviews.py`), interview, preparer and Form 8843 pages (`static/`) |
 | `eval/` | Test cases, TurboTax comparison, metrics |
 | `models/` | Fine-tuned embedding model (not committed) |
 | `logs/` | Run logs (not committed) |
@@ -139,7 +139,7 @@ daily model-call caps, HTTPS, Docker), see [docs/deploy.md](docs/deploy.md). The
 provider is configurable (`LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`): OpenAI, any
 OpenAI-compatible service, or a local model.
 
-## Web chat
+## Chat API
 
 With the same `.env`, PostgreSQL embeddings, and running Ollama instance used by
 the CLI agent, start the backend from the repository root:
@@ -148,9 +148,8 @@ the CLI agent, start the backend from the repository root:
 python -m uvicorn src.app.api:app --host 127.0.0.1 --port 8000
 ```
 
-Open http://127.0.0.1:8000 to chat. Enter sends a message; Shift+Enter adds a
-newline. New chat starts a separate conversation. Answers are displayed as plain
-text, including the agent's citations. The page and API share the same origin.
+There is no separate chat page: http://127.0.0.1:8000 opens the interview, where tax
+questions are answered in place. The chat agent remains available as an API.
 
 `POST /api/chat` accepts `{"message": "Your question", "session_id": null}` and
 returns `{"session_id": "...", "answer": "..."}`. Send the returned session ID
@@ -158,7 +157,7 @@ with subsequent messages to preserve conversation context, including tool result
 
 This local demo stores conversations in server memory. Use one worker; restarting
 the server clears all sessions. Refreshing the page starts a new conversation.
-An expired session returns HTTP 404; select New chat to continue.
+An expired session returns HTTP 404; start a new session (`session_id: null`).
 
 Run the API tests without calling OpenAI, Ollama, or PostgreSQL:
 
@@ -269,8 +268,7 @@ More: `docs/architecture.md` (structure and roadmap), `docs/validation.md` (how 
 | Table extraction (`src/rag/tables.py`) | done: 20 tables, IF/AND/THEN rows as sentences, raw rows saved for code |
 | HNSW + BM25 hybrid retrieval | implemented: RRF fusion, final top-k 5; 200-case baseline completed, RRF Recall@5 87.00% (annotated chunk IDs) |
 | Retrieval reranking | Listwise is the default; the supplied 122-question comparison reports pooled Recall@5 of 83.10% and Context Precision@5 of 94.51%. See the [evaluation comparison](docs/knowledge-base.md#retrieval-evaluation-comparison) for baselines and limitations. |
-| Guided interview Agentic RAG | Adaptive retrieval with up to two follow-up searches. The 32-question live comparison scored 85.94% answer correctness for both modes and increased mean faithfulness from 94.27% to 100.00%. See the [evaluation summary](docs/knowledge-base.md#guided-interview-agentic-rag-evaluation). |
-| Web chat UI + FastAPI | implemented: local, in-memory conversations |
+| Chat API + FastAPI | implemented: in-memory conversations; no separate chat page |
 | Workflow engine (`src/workflow/`) | implemented: modular intake, priority topics, trigger words, escalations, reminders, summary |
 | Interview store (`src/db/interview_store.py`) | implemented: per-browser history; MCP interviews under owner `mcp-assistant`; the preparer page reads every owner |
 | Preparer review (`/preparer`) | implemented: list by status from both channels, summary, record, approve / return |

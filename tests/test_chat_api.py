@@ -28,11 +28,10 @@ class ChatApiTests(unittest.TestCase):
             "message": message, "session_id": session_id,
         })
 
-    def test_page_is_served(self):
-        response = self.client.get("/")
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("text/html", response.headers["content-type"])
-        self.assertIn("/api/chat", response.text)
+    def test_home_opens_the_interview(self):
+        response = self.client.get("/", follow_redirects=False)
+        self.assertEqual(response.status_code, 307)
+        self.assertEqual(response.headers["location"], "/interview")
 
     def test_history_preserves_tool_messages_and_sessions_are_isolated(self):
         history = [

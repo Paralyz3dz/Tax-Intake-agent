@@ -6,6 +6,7 @@ api.py: FastAPI app.
     /api/chat         chat endpoint
     /api/playbooks, /api/interviews/...   guided interview endpoints (src/app/interviews.py)
     /preparer, /api/preparer/...         preparer review of every interview (web page and MCP)
+    /form-8843, /api/interviews/{id}/forms/8843/...   Form 8843 draft from an interview (src/forms/f8843.py)
     /login, /api/login, /api/logout, /api/session   sign-in when TAX_AGENT_MODE=public (src/app/auth.py)
     /healthz          liveness and which optional parts are on
 """
@@ -38,6 +39,7 @@ from src.app.interviews import (DocumentExtractionUnavailable, InvalidInterviewA
                                 list_playbooks)
 from src.app.interview_pdf import render_interview_pdf, render_review_pdf
 from src.app.limits import current_visitor, get_budget
+from src.forms import f8843
 from src.llm.client import LLMUnavailable, set_call_guard
 from src.config import app_settings
 from src.workflow.engine import INTAKE
@@ -235,10 +237,10 @@ class ChatResponse(BaseModel):
     answer: str
 
 
-@app.get("/", response_class=FileResponse)
+@app.get("/", include_in_schema=False)
 def index():
-    """Serve the free-form chat page."""
-    return FileResponse(Path(__file__).parent / "static" / "index.html")
+    """Home: the interview start page. Tax questions are answered inside the interview (no separate chat page)."""
+    return RedirectResponse("/interview", status_code=307)
 
 
 DAILY_LIMIT = "The daily limit for questions has been reached. Please try again tomorrow."
@@ -602,3 +604,65 @@ def pdf_download_response(pdf: bytes, name: str, interview_id: str) -> Response:
         "Content-Disposition": f'attachment; filename="{name}-{short_id}.pdf"',
     })
 
+
+class Form8843Request(BaseModel):
+    """Body of the Form 8843 endpoints: what the student typed on the form page, and the items they ticked.
+
+    details is checked by f8843.clean_details (422 on a bad value). It is used for this one request only:
+    never stored, logged or sent to a model.
+    """
+    details: dict = Field(default_factory=dict)
+    confirmed: list[Annotated[str, StringConstraints(max_length=40)]] = Field(default_factory=list, max_length=50)
+
+    @field_validator("details")
+    @classmethod
+    def limit_details(cls, value: dict) -> dict:
+        if len(value) > 30:
+            raise ValueError("Too many detail fields.")
+        return value
+
+
+@app.get("/form-8843", response_class=FileResponse)
+def form_8843_page(request: Request):
+    """Serve the Form 8843 draft page (opened from a finished interview: /form-8843?interview=<id>)."""
+    response = FileResponse(STATIC / "form8843.html", headers={"Cache-Control": "no-store"})
+    interview_owner(request, response)
+    return response
+
+
+def _form_8843_plan(interview_id: str, payload: Form8843Request, request: Request) -> dict:
+    try:
+        interview = request.app.state.interviews.get(interview_id, owner=interview_owner(request))
+    except InterviewNotFound:
+        raise HTTPException(404, "Interview not found.") from None
+    try:
+        details = f8843.clean_details(payload.details)
+    except f8843.FormDetailsError as exc:
+        raise HTTPException(422, str(exc)) from None
+    state = interview["state"]
+    return f8843.build_plan(state["facts"], details, state["unsure"])
+
+
+@app.post("/api/interviews/{interview_id}/forms/8843/plan")
+def form_8843_plan(interview_id: str, payload: Form8843Request, request: Request):
+    """Every Form 8843 field with its value and status (filled / confirm / user_only / missing)."""
+    return JSONResponse(_form_8843_plan(interview_id, payload, request), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/interviews/{interview_id}/forms/8843/review.pdf")
+def form_8843_review_pdf(interview_id: str, payload: Form8843Request, request: Request):
+    """The marked review copy with its checklist page (stamped "do not mail")."""
+    plan = _form_8843_plan(interview_id, payload, request)
+    return pdf_download_response(f8843.render_pdf(plan, "review"), "form-8843-review", interview_id)
+
+
+@app.post("/api/interviews/{interview_id}/forms/8843/final.pdf")
+def form_8843_final_pdf(interview_id: str, payload: Form8843Request, request: Request):
+    """Pages 1-2 ready to print, sign and mail; 409 with the open items until every check is done."""
+    plan = _form_8843_plan(interview_id, payload, request)
+    try:
+        pdf = f8843.render_pdf(plan, "final", confirmed=payload.confirmed)
+    except f8843.FormNotReady as exc:
+        return JSONResponse({"detail": "The final form is not ready yet.", "reasons": exc.reasons},
+                            status_code=409, headers={"Cache-Control": "no-store"})
+    return pdf_download_response(pdf, "form-8843", interview_id)

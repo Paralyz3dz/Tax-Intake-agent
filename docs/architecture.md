@@ -27,7 +27,7 @@ interviews through the store, not through memory.
 |---|---|---|---|
 | Pages | `src/app/static/interview.html` | Assistant runs the interview: topics first, background note, one question at a time, sources, summary PDF | done |
 | | `src/app/static/preparer.html` | Preparer: every interview by status (web page and MCP), full review PDF, record, approve / return | done |
-| | `src/app/static/index.html` | Rule questions in chat (teammate) | done |
+| | `/api/chat` | Rule questions in chat (teammate); the chat page was removed, tax questions are answered inside the interview | done |
 | API | `src/app/api.py` | HTTP for the pages: interviews per browser (start, answer, documents, history, submit), `/api/preparer/...` for review and decisions, summary downloads, chat | done |
 | MCP | `src/mcp_server/` | The user's own model drives the interview; our engine keeps control; no API key of ours | done |
 | Service | `src/app/interviews.py` | One engine step per call, document facts, interviews saved per owner; `preparer_*` methods read every owner; MCP owner `mcp-assistant` | done |
