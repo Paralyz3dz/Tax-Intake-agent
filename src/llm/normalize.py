@@ -23,10 +23,8 @@ Return JSON: {"value": "<string or null>", "reason": "<short reason>"}"""
 
 
 def make_normalizer(chat=None):
-    """Create the normalizer function that the engine receives.
-
-    Returns None when no model is configured (no OPENAI_API_KEY), so the engine runs
-    rules-only. `chat` replaces chat_json in tests (same signature: (system, user) -> dict).
+    """None when no model is configured, so the engine runs rules-only.
+    `chat` replaces chat_json in tests (same (system, user) -> dict signature).
     """
     if chat is None:
         if not is_configured():
@@ -34,12 +32,8 @@ def make_normalizer(chat=None):
         chat = chat_json
 
     def normalizer(fact: dict, question: dict, note: str) -> str:
-        """Ask the model for one plain value for this fact.
-
-        Sends: fact name, type, allowed options, the question asked, the assistant's note.
-        Returns the proposed value as a string ("yes", "20000", "single", ...).
-        Raises ValueError (shown to the assistant) when the model is unavailable or
-        says the note does not answer the question.
+        """One plain value for this fact as a string ("yes", "20000", "single").
+        ValueError (shown to the assistant) if the model is unavailable or the note does not answer.
         """
         user = json.dumps({
             "fact": fact["name"],

@@ -1,25 +1,20 @@
 """
 engine.py: the guided-interview workflow (the preparer's "digital clone").
 
-Data in:
-    playbooks/<scenario>/scenario.json   facts to collect (name, type, required, ask_when)
-                                         and escalation rules (id, when, reason)
-    playbooks/<scenario>/questions.json  one question per fact (question, why_ask,
-                                         required_docs, retrieval_query, source)
-    State                                what is known so far (src/workflow/state.py)
+Playbooks: playbooks/<scenario>/ or playbooks/modules/*/ (facts, questions, escalation rules).
 
 One turn, step(state, answer):
-    1. extract_facts   answer text -> typed fact value (rules first, model only as a fallback)
-    2. review          escalation rules -> flags, required documents -> missing_docs
-    3. next_question   first required, unknown, askable fact that has a question
+    1. extract_facts   answer -> typed value (rules first, model only as a fallback)
+    2. review          escalation rules -> flags; required documents -> missing_docs
+    3. next_question   first required, unknown, askable fact
     4. build_guide     question + why + documents + retrieved official text
-    5. summarize       when nothing is left: summary for the preparer, optionally submitted for review
+    5. summarize       nothing left: summary for the preparer
 
 Principles:
-    - Which question comes next is decided by code from the playbook, never by the model.
+    - Code picks the next question from the playbook, never the model.
     - A model may propose a value, but parse_value() validates it before it enters the state.
     - The summary only claims passages that retrieval actually returned.
-    - Retrieval (search) and the model (normalizer) are passed in, so tests need neither.
+    - Retrieval and the model are passed in, so tests need neither.
 """
 from __future__ import annotations
 
@@ -47,12 +42,7 @@ UNSURE = {"not sure", "i don't know", "unsure", "don't know", "不确定", "不�
 
 
 def load_scenario(scenario: str) -> tuple[dict, list[dict]]:
-    """Read a playbook. Returns (definition, questions).
-
-    scenario == "intake": the modular playbook in playbooks/modules/ (see compose_modules).
-    Any other name: the single-scenario playbook playbooks/<scenario>/scenario.json + questions.json.
-    definition has id, title, facts, escalation_rules (and reminders, modules for intake).
-    """
+    """"intake" -> the modular playbook (compose_modules); any other name -> playbooks/<scenario>/."""
     if scenario == INTAKE:
         return compose_modules()
     folder = PLAYBOOKS / scenario
@@ -62,14 +52,10 @@ def load_scenario(scenario: str) -> tuple[dict, list[dict]]:
 
 
 def compose_modules() -> tuple[dict, list[dict]]:
-    """Merge playbooks/modules/*/ into one playbook: base_intake first, then the topic modules.
+    """Merge playbooks/modules/*/ into one playbook, base_intake first.
 
-    Every client gets base_intake. A topic module (side_gig, family, ...) is switched on by its
-    "activate_when" conditions, usually a yes to a base_intake question such as has_self_employment.
-    Module "triggers" (trigger words -> facts to ask first) are collected for apply_triggers.
-    That switch is applied by putting activate_when in front of each of the module's ask_when
-    conditions, so next_question needs no special case: a module fact is askable only after its
-    module is on. Facts, questions, escalation rules and reminders are tagged with their module id.
+    A topic module is switched on by its activate_when (usually a yes to a base question). The gate is
+    prepended to each module fact's ask_when, so next_question needs no special case.
     """
     folders = sorted(p for p in MODULES.iterdir() if (p / "module.json").exists())
     folders.sort(key=lambda p: p.name != BASE_MODULE)
@@ -96,17 +82,13 @@ def compose_modules() -> tuple[dict, list[dict]]:
 
 
 def _gated(item: dict, gate: list[dict], module: str) -> dict:
-    """Copy a module's escalation rule or reminder, tagged with the module and switched by its gate.
-
-    A module item may test base facts only (side_gig's estimated-tax reminder uses
-    made_estimated_payments), so without the gate it would fire for clients whose module is off.
-    """
+    """A module rule may test only base facts, so without the gate it would fire with the module off."""
     when = list(item.get("when") or [])
     return dict(item, module=module, when=[c for c in gate if c not in when] + when)
 
 
 def sections(definition: dict) -> list[dict]:
-    """The topics an assistant can put first: base_intake parts and topic modules, as {id, label}."""
+    """The choices for "ask these first": base_intake parts plus topic modules."""
     out = [{"id": k, "label": v} for k, v in BASE_PARTS.items()
            if any(f.get("part") == k for f in definition["facts"])]
     out += [{"id": m["id"], "label": m["title"]} for m in definition.get("modules", []) if m["id"] != BASE_MODULE]
@@ -114,7 +96,6 @@ def sections(definition: dict) -> list[dict]:
 
 
 def section_of(fact: dict) -> str | None:
-    """A fact's section: its topic module, or its base_intake part (about_you, income, ...)."""
     module = fact.get("module")
     if module and module != BASE_MODULE:
         return module
@@ -122,25 +103,22 @@ def section_of(fact: dict) -> str | None:
 
 
 def _position(text: str, keyword: str) -> int | None:
-    """Where keyword first appears in text as a whole word or phrase (case ignored), or None."""
+    """Index of keyword in text as a whole word or phrase (case ignored), or None."""
     m = re.search(r"(?<![a-z0-9_])" + re.escape(keyword.lower()) + r"(?![a-z0-9_])", text.lower())
     return m.start() if m else None
 
 
 def _mentions(text: str, keyword: str) -> bool:
-    """True if keyword appears in text as a whole word or phrase."""
     return _position(text, keyword) is not None
 
 
 def apply_triggers(state: State, definition: dict, text: str) -> list[str]:
-    """Listen for trigger words in the assistant's note and move follow-ups to the front.
+    """Trigger words in free text move follow-up questions to the front.
 
-    The practitioner described the method: the assistant works through a routine list, and a
-    keyword the client says ("kids", "travel", "crypto") opens a set of deeper questions at once.
-      - a trigger's keyword -> its "ask_first" facts go to state.boosted (asked next, in the order
-        the client mentioned them, each only when its own conditions allow; answered facts skipped);
-      - a topic module's "keywords" -> the module is added to state.priority.
-    Returns the ids of triggers and modules that fired, for the history record.
+    The practitioner's method: a keyword the client says ("kids", "crypto") opens deeper questions at once.
+      - trigger keyword -> its ask_first facts go to state.boosted, in the order mentioned
+      - module keyword  -> the module is added to state.priority
+    Returns the ids that fired, for the history record.
     """
     if not text:
         return []
@@ -168,11 +146,10 @@ def apply_triggers(state: State, definition: dict, text: str) -> list[str]:
 
 
 def ordered_facts(definition: dict, priority: list[str], boosted: list[dict] | None = None) -> list[dict]:
-    """Facts in asking order: triggered facts first, then the priority sections, then the playbook order.
+    """Asking order: triggered facts, then priority sections, then playbook order.
 
-    For a prioritized topic module, the base question that switches it on (its activate_when
-    fact, e.g. has_self_employment for side_gig) is moved up too, just before the module, so
-    choosing "Self-employment" starts the interview with "Did you earn money on your own...".
+    A prioritized module also pulls up the base question that switches it on (e.g. has_self_employment
+    for side_gig), so choosing "Self-employment" starts with that question.
     """
     boost = {}
     for b in boosted or []:
@@ -197,12 +174,8 @@ def ordered_facts(definition: dict, priority: list[str], boosted: list[dict] | N
 
 
 def start_interview(scenario: str, priority: list[str] | None = None, background: str = "") -> State:
-    """Create a new State for this scenario with every fact set to None (unknown).
-
-    priority: section ids the assistant wants asked first (see sections()), e.g. ["side_gig"]
-    when the assistant is unsure about self-employment. Order matters; unknown ids raise ValueError.
-    background: optional short description of the client ("W-2 job, drives Uber, two kids");
-    its trigger words and module keywords reorder the interview before the first question.
+    """priority: section ids to ask first, in order (unknown ids raise ValueError).
+    background: client note whose trigger words reorder the interview before the first question.
     """
     definition, _ = load_scenario(scenario)
     priority = list(priority or [])
@@ -219,16 +192,7 @@ def start_interview(scenario: str, priority: list[str] | None = None, background
 
 
 def next_question(state: State) -> dict | None:
-    """Decide the next question. Pure code, no model.
-
-    Walks the facts in asking order (ordered_facts: the assistant's priority sections first,
-    then the playbook order) and returns the question for the first fact that is
-        1. required,
-        2. still unknown (None) in state.facts,
-        3. allowed now: its ask_when conditions hold (conditions.check),
-        4. covered by a question in questions.json (facts without one are skipped).
-    Returns None when nothing is left to ask, which ends the interview.
-    """
+    """Pure code, no model. None means nothing is left to ask, which ends the interview."""
     definition, questions = load_scenario(state.scenario)
     by_fact = {q["fact"]: q for q in questions}
     for f in ordered_facts(definition, state.priority, state.boosted):
@@ -249,15 +213,8 @@ def next_question(state: State) -> dict | None:
 
 
 def review(state: State) -> State:
-    """Run the playbook's checks after every accepted answer. Pure code.
-
-    Reads: scenario.json "escalation_rules" and each question's "required_docs".
-    Updates the same state object and returns it:
-        - every rule whose "when" conditions hold is added to state.flags once
-          ({"rule": id, "reason": text});
-        - for every question whose fact is answered with a truthy value (True, an amount,
-          a non-empty list), its required_docs are added to state.missing_docs once.
-          A "no" (False) answer needs no documents.
+    """After every accepted answer: add matching escalation rules to flags (once), and the
+    required_docs of every truthy answer to missing_docs (once). A "no" needs no documents.
     """
     definition, questions = load_scenario(state.scenario)
 
@@ -278,11 +235,7 @@ def review(state: State) -> State:
 
 
 def fact_definition(definition: dict, name: str) -> dict:
-    """Return the scenario.json entry (name, type, options, required, ask_when) for one fact.
-
-    Raises KeyError if the fact is not defined, which means questions.json and
-    scenario.json disagree.
-    """
+    """KeyError means questions.json and scenario.json disagree."""
     for f in definition["facts"]:
         if f["name"] == name:
             return f
@@ -290,14 +243,12 @@ def fact_definition(definition: dict, name: str) -> dict:
 
 
 def parse_value(fact: dict, text: str):
-    """Convert answer text into the fact's type, or raise ValueError. No model involved.
+    """Answer text -> the fact's type, or ValueError telling the assistant what to enter. No model.
 
-    Reads: fact["type"] and, for enums, fact["options"].
-        bool   "yes" / "no" (also y, true, 1, 是, 有, 没有 ...)         -> True / False
-        money  "$12,000", "99.5"; negative amounts rejected           -> int or float
-        enum   must be one of options; "Head of household" accepted   -> "head_of_household"
-        list   comma-separated, or "none"                             -> list of str
-    The ValueError message tells the assistant what to enter instead.
+        bool   yes / no (also y, true, 1, 是, 有, 没有 ...)  -> True / False
+        money  "$12,000", "99.5"; negative rejected       -> int or float
+        enum   one of options; "Head of household" ok     -> "head_of_household"
+        list   comma-separated, or "none"                 -> list of str
     """
     raw = text.strip()
     low = raw.lower()
@@ -335,17 +286,9 @@ def parse_value(fact: dict, text: str):
 
 
 def extract_facts(state: State, question: dict, answer_text: str, normalizer=None) -> dict:
-    """Turn the assistant's answer into a validated fact value.
-
-    Reads: the fact definition of question["fact"] from scenario.json.
-    Steps:
-        1. parse_value(answer_text): exact answers such as "yes", "12,000", "single".
-        2. Only if that fails and a normalizer is given (src/llm/normalize.py): the model
-           turns free text ("she took about 20k out of her IRA") into a plain value
-           ("20000"), and that proposal goes through parse_value() again.
-    If the model is unavailable, unsure, or proposes an invalid value, the original
-    ValueError is raised, so nothing unvalidated is ever written into the state.
-    Returns {"facts": {fact_name: value}, "parsed_by": "rules" | "model"}.
+    """Rules first; if they fail and a normalizer is given, the model rewrites free text
+    ("about 20k from her IRA" -> "20000") and that goes through parse_value() again.
+    If the model fails too, the original ValueError is raised: nothing unvalidated reaches the state.
     """
     definition, _ = load_scenario(state.scenario)
     fact = fact_definition(definition, question["fact"])
@@ -363,35 +306,20 @@ def extract_facts(state: State, question: dict, answer_text: str, normalizer=Non
 
 
 def _default_search(query: str, *, question: dict | None = None) -> dict:
-    """Real retrieval (src/rag/retriever.retrieve: Ollama embedding + RDS hybrid search).
-
-    Imported inside the function so the engine and its tests load without DB / Ollama.
-    """
+    """Imported here so the engine and its tests load without the DB or Ollama."""
     from src.rag.retriever import retrieve
     return retrieve(query, question=question)
 
 
 def _doc_key(text: str) -> str:
-    """Reduce a reference or citation to its document name for comparison.
-
-    'IRS Pub 17, Chapter 2' and "IRS Pub 17 (2025), 'Filing status', p. 23" both become
-    'irs pub 17': drop a "(year)", keep the part before the first comma, lower-case.
-    """
+    """Document name for comparing references: "IRS Pub 17 (2025), 'Filing status', p. 23" -> "irs pub 17"."""
     head = re.sub(r"\s*\(\d{4}\)", "", text).split(",")[0]
     return " ".join(head.lower().split())
 
 
 def check_references(source: str, citations: list[dict], retrieval_ok: bool) -> list[dict]:
-    """Compare the playbook's hand-written references with what retrieval returned.
-
-    Reads:
-        source        question["source"], e.g. "IRS Pub 590-B; FTB 3805P"
-        citations     passages returned by retrieval ({"citation", "text"})
-        retrieval_ok  False when retrieval raised an error
-    Returns one {"reference", "retrieved"} per reference, where retrieved is
-        True   the document appeared among the retrieved passages,
-        False  it did not (probably not in the knowledge base yet),
-        None   retrieval was down, so it could not be checked.
+    """Mark each playbook reference (question["source"], ";"-separated) by retrieval result:
+    True found, False not found (likely missing from the knowledge base), None retrieval was down.
     """
     found = {_doc_key(c["citation"]) for c in citations if c.get("citation")}
     found.update(_doc_key(alias) for c in citations for alias in c.get("additional_citations", []))
@@ -405,7 +333,6 @@ def check_references(source: str, citations: list[dict], retrieval_ok: bool) -> 
 
 
 def _section_label(definition: dict, fact: dict) -> str | None:
-    """Human label of a fact's section ("Income", "Self-employment and gig income", ...)."""
     sec = section_of(fact)
     for s in sections(definition):
         if s["id"] == sec:
@@ -414,22 +341,12 @@ def _section_label(definition: dict, fact: dict) -> str | None:
 
 
 def build_guide(state: State, question: dict, search=None, top_n: int = 5, *, question_search=None) -> dict:
-    """Build what the assistant sees for one question.
+    """What the assistant sees for one question.
 
-    Reads: the question dict, its fact definition (type, options), state.flags,
-    and search(question["retrieval_query"]) (real retrieval unless a stub is passed).
-    Retrieval errors (DB stopped, Ollama off, network) are logged and the guide is
-    still returned without passages, so the interview never stops because of RAG.
-
-    Two kinds of "source" are kept apart:
-        citations   passages retrieval really returned (top_n, complete chunk text)
-        references  the playbook's pointer to where the rule lives, marked by
-                    check_references() as found / not found / unchecked
-    Both are stored in state.evidence[question id] for summarize().
-
-    Returns {"type": "question", question_id, fact, input_type, options, step_number, section, triggered_by,
-             question, why_ask, required_docs, references, citations, retrieval_error, flags}.
-    input_type / options tell the page which buttons to show (Yes/No, option chips, text).
+    Retrieval errors are logged and the guide is returned without passages: RAG never stops the interview.
+    Two kinds of source are kept apart and saved in state.evidence for summarize():
+        citations   passages retrieval really returned
+        references  the playbook's pointers, marked by check_references()
     """
     definition, _ = load_scenario(state.scenario)
     fact = fact_definition(definition, question["fact"])
@@ -474,24 +391,10 @@ def build_guide(state: State, question: dict, search=None, top_n: int = 5, *, qu
 
 
 def summarize(state: State) -> dict:
-    """Build the summary for the preparer.
+    """Summary for the preparer.
 
-    Reads: state.facts, flags, missing_docs, history, evidence; scenario.json facts;
-    questions.json (to map facts to question ids).
-    Returns {"type": "summary", ...} with:
-        facts                  every answered fact (value not None)
-        not_yet_covered        required, askable facts the playbook has no question for yet
-        flags / needs_preparer_attention / missing_docs
-        citations_retrieved    citations really returned for the answered questions
-        references_to_verify   all playbook references of the answered questions
-        references_not_in_kb   references whose document retrieval never returned for any question
-                               of this interview (possible knowledge-base gaps); a reference that
-                               missed the top results for one question but came back for another
-                               is in the knowledge base and is not listed
-        references_unchecked   references not checked because retrieval was down
-        reminders              record-keeping reminders whose conditions hold (modular playbook)
-        priority               sections the assistant chose to ask first
-        turns, status
+    references_not_in_kb lists references retrieval never returned for any question in this interview
+    (possible knowledge-base gaps); one that missed for a question but came back for another is not listed.
     """
     definition, questions = load_scenario(state.scenario)
     by_fact = {q["fact"]: q for q in questions}
@@ -542,7 +445,6 @@ def summarize(state: State) -> dict:
 
 
 def _question_by_id(state: State, question_id: str) -> dict:
-    """Return the question dict with this id from questions.json (KeyError if absent)."""
     _, questions = load_scenario(state.scenario)
     for q in questions:
         if q["id"] == question_id:
@@ -551,7 +453,6 @@ def _question_by_id(state: State, question_id: str) -> dict:
 
 
 def _show(state: State, question: dict, search, question_search) -> dict:
-    """Mark the question as the current one (append to state.asked once) and build its guide."""
     if not state.asked or state.asked[-1] != question["id"]:
         state.asked.append(question["id"])
     return build_guide(state, question, search=search, question_search=question_search)
@@ -582,20 +483,11 @@ def record_answer(state: State, answer_text: str, normalizer=None) -> str | None
 
 def step(state: State, answer_text: str | None = None, search=None,
          normalizer=None, *, question_search=None, auto_submit: bool = True) -> tuple[State, dict]:
-    """Run one turn of the interview. Returns (state, output).
+    """One turn. step(state) -> first question; step(state, answer) -> answer the last asked question.
 
-    step(state)          -> the first question (no answer yet)
-    step(state, answer)  -> the answer is for the last question in state.asked: extract_facts;
-                            if it was a free-text note (not a button or exact value), its trigger
-                            words reorder what comes next (apply_triggers) -> update facts and history -> review ->
-                            next_question -> build_guide, or summarize when done
-
-    output["type"] is one of
-        "question"  guide for the next question (see build_guide)
-        "error"     the answer could not be understood; state is unchanged and
-                    output["guide"] shows the same question again
-        "summary"   interview finished (see summarize)
-    search / normalizer are injected: real retrieval and the LLM in the app, stubs in tests.
+    output["type"]: "question" (next guide), "error" (answer not understood; state unchanged,
+    output["guide"] repeats the question) or "summary" (done).
+    Only a free-text answer (not a button or exact value) can fire trigger words.
     Raises RuntimeError if the interview is no longer in progress.
     """
     if state.status != "in_progress":
@@ -617,14 +509,10 @@ def step(state: State, answer_text: str | None = None, search=None,
 
 
 def undo(state: State, search=None, *, question_search=None) -> tuple[State, dict]:
-    """Take back the client's last answer and show that question again. Returns (state, output).
+    """Take back the last manual answer and ask it again.
 
-    Only manual answers are undone (history entries with "answer_text"); facts filled from
-    uploaded documents and tax questions ("tax_qa") are left alone.
-    Flags and missing_docs are derived from facts, so they are cleared and rebuilt by review().
-    Allowed only while the interview is in progress (including a summary not yet submitted);
-    once it is submitted to the preparer or decided, RuntimeError: the preparer must return it.
-    Raises ValueError when there is no answer to undo.
+    Facts from uploaded documents and tax questions are left alone. Flags and missing_docs are rebuilt by
+    review(). RuntimeError once submitted or decided (the preparer must return it); ValueError if nothing to undo.
     """
     if state.status != "in_progress":
         raise RuntimeError(f"Interview is {state.status}; answers can no longer be changed.")

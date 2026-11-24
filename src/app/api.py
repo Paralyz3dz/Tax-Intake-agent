@@ -1,14 +1,12 @@
 """
 api.py: FastAPI app.
 
-    /                 free-form tax chat (LangChain agent, src/agent.py)
-    /interview        guided client interview page
-    /api/chat         chat endpoint
-    /api/playbooks, /api/interviews/...   guided interview endpoints (src/app/interviews.py)
-    /preparer, /api/preparer/...         preparer review of every interview (web page and MCP)
-    /form-8843, /api/interviews/{id}/forms/8843/...   Form 8843 draft from an interview (src/forms/f8843.py)
-    /login, /api/login, /api/logout, /api/session   sign-in when TAX_AGENT_MODE=public (src/app/auth.py)
-    /healthz          liveness and which optional parts are on
+    /interview, /api/interviews/...    guided interview (src/app/interviews.py); / redirects here
+    /api/chat                          free-form tax Q&A (src/agent.py)
+    /preparer, /api/preparer/...       preparer review of every interview (web and MCP)
+    /form-8843, .../forms/8843/...     Form 8843 draft from an interview (src/forms/f8843.py)
+    /login, /api/login|logout|session  sign-in when TAX_AGENT_MODE=public (src/app/auth.py)
+    /healthz                           liveness and which optional parts are on
 """
 import asyncio
 from contextlib import asynccontextmanager, suppress
@@ -63,20 +61,14 @@ def interview_owner(request: Request, response: Response | None = None) -> str:
 
 @dataclass
 class Session:
-    """One chat conversation: its message history and a lock so one session handles one request at a time."""
     messages: list = field(default_factory=list)
     lock: Lock = field(default_factory=Lock)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Create the chat agent and the interview service at startup.
-
-    If the chat agent cannot be created (e.g. no OPENAI_API_KEY), only /api/chat is
-    disabled (503); the guided interview still works. A public site with missing sign-in
-    settings refuses to start (auth.check_public_settings). The daily budget is installed as
-    the model call guard for as long as the app runs.
-    """
+    """Startup. If the chat agent fails to build, only /api/chat is off (503); interviews still work.
+    Public mode with missing sign-in settings refuses to start."""
     app.state.settings = app_settings()
     auth.check_public_settings(app.state.settings)
     app.state.login_attempts = auth.LoginAttempts()
@@ -98,7 +90,6 @@ async def lifespan(app: FastAPI):
 
 
 async def _retention_loop(service: InterviewService, days: int, every: float = 6 * 60 * 60):
-    """Delete old interviews at startup and every few hours (TAX_AGENT_RETENTION_DAYS; 0 = never)."""
     if days <= 0:
         return
     while True:
@@ -122,13 +113,11 @@ def _needs_preparer(path: str) -> bool:
 
 @app.middleware("http")
 async def access_control(request: Request, call_next):
-    """Public mode: every page and API needs a session; /preparer needs a preparer session.
+    """Sign-in gate (public mode only; OPEN_PATHS skip it).
 
-    OPEN_PATHS (sign-in, health check, fonts, stylesheet) are reachable without signing in.
-
-    Pages redirect to /login; API calls get 401 (not signed in) or 403 (not a preparer).
-    The session is kept on request.state.session (None in local mode). Every request is also
-    tagged with its visitor, whom model calls are counted against (src/app/limits.py).
+    - Not signed in: pages redirect to /login, /api/* get 401.
+    - /preparer without the preparer role: 403.
+    - Sets request.state.session (None in local mode) and the visitor that model calls are counted against.
     """
     settings = request.app.state.settings
     path = request.url.path
@@ -150,12 +139,11 @@ async def access_control(request: Request, call_next):
 
 
 def _visitor(request: Request) -> str:
-    """This browser (its interview cookie), else its address."""
     return interview_owner(request) or "ip:" + (request.client.host if request.client else "unknown")
 
 
 class LoginRequest(BaseModel):
-    """Body of POST /api/login: an invite code, or a preparer's username and password."""
+    """Either invite_code (client) or username + password (preparer)."""
     invite_code: str = Field(default="", max_length=200)
     username: str = Field(default="", max_length=100)
     password: str = Field(default="", max_length=200)
@@ -171,7 +159,7 @@ def login_page():
 
 @app.post("/api/login")
 def login(payload: LoginRequest, request: Request, response: Response):
-    """Sign in (public mode); sets the session cookie. 401 wrong code or password, 429 too many failures."""
+    """Local mode always succeeds. Public: 401 wrong credentials, 429 after too many failures per IP."""
     settings = request.app.state.settings
     if not settings.public:
         return LOCAL_SESSION
@@ -200,7 +188,6 @@ def logout():
 
 @app.get("/api/session")
 def current_session(request: Request):
-    """Who is signed in: {"mode", "role", "name"} (role None if nobody)."""
     settings = request.app.state.settings
     if not settings.public:
         return LOCAL_SESSION
@@ -217,14 +204,12 @@ def healthz(request: Request):
 
 
 class ChatRequest(BaseModel):
-    """Body of POST /api/chat: {"message": text, "session_id": optional UUID of an existing chat}."""
     message: str = Field(min_length=1, max_length=10000)
     session_id: UUID | None = None
 
     @field_validator("message")
     @classmethod
     def strip_message(cls, value: str) -> str:
-        """Trim spaces; reject a message that is only whitespace (422)."""
         value = value.strip()
         if not value:
             raise ValueError("Message must not be blank.")
@@ -232,14 +217,12 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    """Reply of POST /api/chat: the session id to send next time and the agent's answer."""
     session_id: UUID
     answer: str
 
 
 @app.get("/", include_in_schema=False)
 def index():
-    """Home: the interview start page. Tax questions are answered inside the interview (no separate chat page)."""
     return RedirectResponse("/interview", status_code=307)
 
 
@@ -248,11 +231,8 @@ DAILY_LIMIT = "The daily limit for questions has been reached. Please try again 
 
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(payload: ChatRequest, request: Request):
-    """Free-form tax Q&A: run the LangChain agent (retrieval tool + OpenAI) on the session's history.
-
-    503 if the agent is not configured, 404 for an unknown session, 502 if the agent fails,
-    429 if the daily model-call budget is spent (before or during the answer; each model call
-    the agent makes is counted by the call guard). A failed turn does not change the saved history."""
+    """503 no agent, 404 unknown session, 502 agent failed, 429 daily budget spent (checked before
+    and during the answer). A failed turn leaves the saved history unchanged."""
     state = request.app.state
     if state.agent is None:
         raise HTTPException(503, "Chat is not configured. Set LLM_API_KEY and restart.")
@@ -296,7 +276,7 @@ def chat(payload: ChatRequest, request: Request):
 
 
 class StartRequest(BaseModel):
-    """Body of POST /api/interviews: {"scenario", "priority": [section ids asked first], "background": client note}."""
+    """priority: section ids to ask first. background: free-text note from the client."""
     scenario: str = Field(min_length=1, max_length=100)
     priority: list[str] = Field(default_factory=list, max_length=20)
     background: str = Field(default="", max_length=2000)
@@ -311,7 +291,6 @@ class AnswerRequest(BaseModel):
     @field_validator("answer")
     @classmethod
     def strip_answer(cls, value: str | None) -> str | None:
-        """Trim spaces; reject an answer that is only whitespace (422)."""
         if value is None:
             return None
         value = value.strip()
@@ -345,7 +324,6 @@ class SyncDocumentsRequest(BaseModel):
 
 @app.get("/interview", response_class=FileResponse)
 def interview_page(request: Request):
-    """Serve the assistant's guided-interview page."""
     response = FileResponse(Path(__file__).parent / "static" / "interview.html",
                             headers={"Cache-Control": "no-store"})
     interview_owner(request, response)
@@ -360,7 +338,8 @@ def interview_font():
 
 @app.get("/workspace.css", response_class=FileResponse, include_in_schema=False)
 def workspace_stylesheet():
-    return FileResponse(Path(__file__).parent / "static" / "workspace.css", media_type="text/css")
+    return FileResponse(Path(__file__).parent / "static" / "workspace.css", media_type="text/css",
+                        headers={"Cache-Control": "no-store"})
 
 
 @app.get("/interview/instrument-serif.ttf", response_class=FileResponse, include_in_schema=False)
@@ -371,7 +350,6 @@ def interview_title_font():
 
 @app.get("/api/playbooks")
 def playbooks():
-    """List available scenarios for the page's dropdown."""
     return {"playbooks": list_playbooks()}
 
 
@@ -384,7 +362,7 @@ def interview_list(request: Request):
 
 @app.post("/api/interviews")
 def start(payload: StartRequest, request: Request, response: Response):
-    """Start an interview; returns the first question and a sidebar snapshot (404 unknown scenario, 422 bad priority)."""
+    """404 unknown scenario, 422 bad priority, 409 a staged document is gone."""
     try:
         owner = interview_owner(request, response)
         result = request.app.state.interviews.start(
@@ -401,7 +379,6 @@ def start(payload: StartRequest, request: Request, response: Response):
 
 @app.post("/api/interviews/{interview_id}/answer")
 def answer(interview_id: str, payload: AnswerRequest, request: Request):
-    """Submit an answer; returns the next question, an error, or the summary (404 / 409)."""
     try:
         result = request.app.state.interviews.answer(
             interview_id, payload.answer, payload.question_id, owner=interview_owner(request),
@@ -419,7 +396,7 @@ def answer(interview_id: str, payload: AnswerRequest, request: Request):
 
 @app.post("/api/interviews/{interview_id}/undo")
 def undo_answer(interview_id: str, request: Request):
-    """Take back the last answer; returns that question again (404 unknown, 409 nothing to undo / decided)."""
+    """409 when there is nothing to undo or the preparer has already decided."""
     try:
         result = request.app.state.interviews.undo(interview_id, owner=interview_owner(request))
         return JSONResponse(result, headers={"Cache-Control": "no-store"})
@@ -493,7 +470,6 @@ def sync_documents(interview_id: str, payload: SyncDocumentsRequest, request: Re
 
 @app.get("/api/interviews/{interview_id}")
 def get_interview(interview_id: str, request: Request):
-    """Return the interview state, history, and current question or summary."""
     try:
         result = request.app.state.interviews.get(interview_id, owner=interview_owner(request))
         return JSONResponse(result, headers={"Cache-Control": "no-store"})
@@ -542,7 +518,7 @@ def preparer_page():
 
 @app.get("/api/preparer/interviews")
 def preparer_list(request: Request, status: str | None = None, limit: int = 100):
-    """Every interview (web page and MCP), newest first; status filters by state."""
+    """All owners' interviews (web and MCP), newest first. Unlike /api/interviews, not filtered by browser."""
     if status is not None and status not in PREPARER_STATUSES:
         raise HTTPException(422, f"status must be one of {sorted(PREPARER_STATUSES)}")
     items = request.app.state.interviews.preparer_list(status, max(1, min(limit, 500)))
@@ -560,7 +536,7 @@ def preparer_get(interview_id: str, request: Request):
 
 @app.post("/api/preparer/interviews/{interview_id}/decision")
 def preparer_decide(interview_id: str, payload: DecisionRequest, request: Request):
-    """Approve or return any interview waiting for the preparer (409 otherwise)."""
+    """409 unless the interview is waiting for the preparer."""
     try:
         session = request.state.session
         result = request.app.state.interviews.preparer_decide(interview_id, payload.approve, payload.note,
@@ -606,11 +582,9 @@ def pdf_download_response(pdf: bytes, name: str, interview_id: str) -> Response:
 
 
 class Form8843Request(BaseModel):
-    """Body of the Form 8843 endpoints: what the student typed on the form page, and the items they ticked.
-
-    details is checked by f8843.clean_details (422 on a bad value). It is used for this one request only:
-    never stored, logged or sent to a model.
-    """
+    """details: what the student typed on the form page (validated by f8843.clean_details, 422 if bad).
+    Privacy: used for this one request only. Never stored, logged or sent to a model.
+    confirmed: ids of the checklist items the student ticked."""
     details: dict = Field(default_factory=dict)
     confirmed: list[Annotated[str, StringConstraints(max_length=40)]] = Field(default_factory=list, max_length=50)
 
@@ -624,7 +598,7 @@ class Form8843Request(BaseModel):
 
 @app.get("/form-8843", response_class=FileResponse)
 def form_8843_page(request: Request):
-    """Serve the Form 8843 draft page (opened from a finished interview: /form-8843?interview=<id>)."""
+    """Opened from a finished interview as /form-8843?interview=<id>."""
     response = FileResponse(STATIC / "form8843.html", headers={"Cache-Control": "no-store"})
     interview_owner(request, response)
     return response
@@ -645,20 +619,20 @@ def _form_8843_plan(interview_id: str, payload: Form8843Request, request: Reques
 
 @app.post("/api/interviews/{interview_id}/forms/8843/plan")
 def form_8843_plan(interview_id: str, payload: Form8843Request, request: Request):
-    """Every Form 8843 field with its value and status (filled / confirm / user_only / missing)."""
+    """Each field's value and status: filled / confirm / user_only / missing."""
     return JSONResponse(_form_8843_plan(interview_id, payload, request), headers={"Cache-Control": "no-store"})
 
 
 @app.post("/api/interviews/{interview_id}/forms/8843/review.pdf")
 def form_8843_review_pdf(interview_id: str, payload: Form8843Request, request: Request):
-    """The marked review copy with its checklist page (stamped "do not mail")."""
+    """Marked-up copy plus checklist page, stamped "do not mail"."""
     plan = _form_8843_plan(interview_id, payload, request)
     return pdf_download_response(f8843.render_pdf(plan, "review"), "form-8843-review", interview_id)
 
 
 @app.post("/api/interviews/{interview_id}/forms/8843/final.pdf")
 def form_8843_final_pdf(interview_id: str, payload: Form8843Request, request: Request):
-    """Pages 1-2 ready to print, sign and mail; 409 with the open items until every check is done."""
+    """Pages 1-2 to print, sign and mail. 409 with the open items until every check is confirmed."""
     plan = _form_8843_plan(interview_id, payload, request)
     try:
         pdf = f8843.render_pdf(plan, "final", confirmed=payload.confirmed)

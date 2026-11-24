@@ -1,8 +1,7 @@
 """
-state.py: everything the engine remembers about one client interview.
+state.py: everything the engine remembers about one interview.
 
-The state is plain data (str / dict / list / bool / number), so the whole object can be
-saved as one JSONB value (a future interviews table) and loaded back to pause / resume.
+Plain data only (str / dict / list / bool / number), so it saves as one JSON value and loads back to resume.
 """
 from __future__ import annotations
 
@@ -50,10 +49,8 @@ class State:
     status: str = "in_progress"
 
     def to_dict(self) -> dict:
-        """Plain dict of all fields (for JSON / database storage)."""
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict) -> "State":
-        """Rebuild a State from to_dict() output."""
         return cls(**data)

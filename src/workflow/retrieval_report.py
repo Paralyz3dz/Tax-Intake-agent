@@ -31,7 +31,6 @@ TOP_N = 5
 
 
 def cached(search):
-    """Wrap a search function so each query runs once."""
     memo: dict[str, dict] = {}
 
     def run(query: str) -> dict:
@@ -42,7 +41,6 @@ def cached(search):
 
 
 def check_question(question: dict, search) -> dict:
-    """Retrieve for one question and compare with its source. Returns one report row."""
     try:
         matches = (search(question["retrieval_query"]).get("matches") or [])[:TOP_N]
         ok = True
@@ -56,7 +54,6 @@ def check_question(question: dict, search) -> dict:
 
 
 def all_questions(search) -> list[dict]:
-    """One row per playbook question, from its fixed retrieval_query."""
     _, questions = load_scenario(INTAKE)
     return [check_question(q, search) for q in questions]
 
@@ -71,7 +68,7 @@ def default_answer(question: dict) -> str:
 
 
 def replay_case(path: Path, search) -> list[dict]:
-    """Play a fictional case start to summary with real retrieval; one row per question asked."""
+    """Play a fictional case to the summary with real retrieval; one row per question asked."""
     case = json.loads(path.read_text(encoding="utf-8"))
     _, questions = load_scenario(INTAKE)
     by_id = {q["id"]: q for q in questions}
@@ -92,7 +89,6 @@ def _doc(citation: str) -> str:
 
 
 def render(title: str, rows: list[dict]) -> str:
-    """Markdown report: coverage per source document, misses, documents never returned."""
     errors = [r for r in rows if r.get("error")]
     per_doc = defaultdict(lambda: [0, 0])
     misses, seen = [], set()
@@ -128,7 +124,7 @@ def render(title: str, rows: list[dict]) -> str:
 
 
 def main(argv: list[str] | None = None, search=None) -> str:
-    """Run the chosen check and print the report; returns it (tests pass a stub search)."""
+    """Prints and returns the report (tests pass a stub search)."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--case", help="case file name in tests/cases/, without .json")
     parser.add_argument("--all-cases", action="store_true", help="replay every case in tests/cases/")

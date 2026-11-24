@@ -234,12 +234,8 @@ def _us_date(value: date) -> str:
 
 
 def build_plan(facts: dict, details: dict | None = None, unsure: list | None = None) -> dict:
-    """Every field of the form with its value, status and a note for the student.
-
-    facts    interview facts (State.facts); details: clean_details() output or None (MCP: the
-             assistant never collects names or addresses, so those fields come back "missing").
-    Returns {"form", "revision", "applicable", "stops", "filing", "fields", "to_confirm",
-             "user_only", "missing", "ready_for_final"}.
+    """details: clean_details() output, or None for MCP (the assistant never collects names or
+    addresses, so those fields come back "missing").
     """
     spec = load_spec()
     d = details if details is not None else clean_details({})

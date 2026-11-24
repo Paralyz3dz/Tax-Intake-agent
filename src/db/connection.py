@@ -13,8 +13,7 @@ load_dotenv(ROOT / ".env")
 
 
 def get_conn(register_vectors=False):
-    """Open a connection. register_vectors=True lets you pass numpy arrays
-    as pgvector values (needed for embeddings and vector search)."""
+    """register_vectors=True: numpy arrays can be passed as pgvector values (embeddings, vector search)."""
     url = os.environ.get("DATABASE_URL")
     if not url:
         raise RuntimeError("DATABASE_URL is not set: copy .env.example to .env and fill it in.")
