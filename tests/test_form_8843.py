@@ -53,13 +53,13 @@ class CountDaysPresentTests(unittest.TestCase):
         self.assertEqual(count_days_present(date(2024, 8, 15), [], 2023), 0)
 
     def test_departure_and_return_days_count(self):
-        trip = [(date(2025, 6, 1), date(2025, 6, 20))]          # June 2-19 abroad: 18 days
+        trip = [(date(2025, 6, 1), date(2025, 6, 20))]
         self.assertEqual(count_days_present(date(2023, 9, 1), trip, 2025), 365 - 18)
 
     def test_trip_across_new_year(self):
         trip = [(date(2024, 12, 20), date(2025, 1, 10))]
-        self.assertEqual(count_days_present(date(2024, 8, 15), trip, 2025), 365 - 9)   # Jan 1-9
-        self.assertEqual(count_days_present(date(2024, 8, 15), trip, 2024), 139 - 11)  # Dec 21-31
+        self.assertEqual(count_days_present(date(2024, 8, 15), trip, 2025), 365 - 9)
+        self.assertEqual(count_days_present(date(2024, 8, 15), trip, 2024), 139 - 11)
 
     def test_left_for_good(self):
         self.assertEqual(count_days_present(date(2023, 9, 1), [], 2025, until=date(2025, 5, 31)), 151)
@@ -74,7 +74,7 @@ class StudentPlaybookTests(unittest.TestCase):
         _, own = load_scenario("student_8843")
         _, intake = load_scenario("intake")
         prints = {fingerprint(q) for q in intake}
-        self.assertTrue(all(fingerprint(q) in prints for q in own))   # prebuilt passages still apply
+        self.assertTrue(all(fingerprint(q) in prints for q in own))
 
     def test_f1_run_asks_only_the_form_questions_and_fills_the_plan(self):
         from src.workflow.engine import start_interview, step
@@ -101,6 +101,46 @@ class StudentPlaybookTests(unittest.TestCase):
         state, out = step(state, "yes", search=stub)
         self.assertNotEqual(out["type"], "question")
         self.assertFalse(f8843.build_plan(state.facts)["applicable"])
+
+
+class McpDraftTests(unittest.TestCase):
+    """mcp_server.tools.draft_form_8843: what the assistant may see, without any personal details."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        from src.app.interviews import InterviewService
+        from src.db.interview_store import InterviewStore
+        from src.mcp_server import tools
+        self.tools = tools
+        self.folder = tempfile.TemporaryDirectory()
+        store = InterviewStore(path=Path(self.folder.name) / "interviews.sqlite3")
+        self.service = InterviewService(search=lambda q: {"matches": []}, store=store)
+        tools.set_service(self.service)
+
+    def tearDown(self):
+        self.tools.set_service(None)
+        self.folder.cleanup()
+
+    def finished_f1_interview(self):
+        from src.app.interviews import MCP_OWNER
+        started = self.service.start("student_8843", [], "", owner=MCP_OWNER)
+        interview_id = started["state"]["interview_id"]
+        for answer in ("no", "no", "F visa", "yes", "no", "no"):
+            self.service.answer(interview_id, answer, owner=MCP_OWNER)
+        return interview_id
+
+    def test_f1_student_gets_settled_lines_and_what_to_fill_in(self):
+        draft = self.tools.draft_form_8843(self.finished_f1_interview())
+        self.assertTrue(draft["applicable"])
+        self.assertEqual(draft["needs_preparer"], [])
+        self.assertEqual({line["line"]: line["answer"] for line in draft["settled_by_interview"]
+                          if line["line"] in ("12", "13")}, {"12": "No", "13": "No"})
+        self.assertTrue(any("First name" in item for item in draft["client_fills_on_form_page"]))
+        self.assertIn("passport number", draft["tell_the_client"])
+
+    def test_unknown_interview(self):
+        self.assertIn("error", self.tools.draft_form_8843("no-such-interview"))
 
 
 @patch.object(f8843, "count_days_present", simple_count)

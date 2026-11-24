@@ -29,6 +29,7 @@ tester chose.
 | `start_interview(priority, background)` | no | Starts an intake; returns `rules` and the first question with `answer_format`, `why_ask` and any official text |
 | `submit_answer(interview_id, answer, client_note)` | no | Sends one answer; returns the next question, or the summary when the interview is complete |
 | `get_interview(interview_id)` | yes | Answers so far, escalations, documents to collect |
+| `draft_form_8843(interview_id)` | yes | For an F, J or M student: Form 8843 lines the interview settles, what needs the preparer, and what the client fills in on the web form page (no names or ID numbers pass through the assistant) |
 | `lookup_official_text(query)` | yes | Searches the IRS / FTB knowledge base (needs the database and Ollama running) |
 
 "Read-only" is the MCP `readOnlyHint` annotation. ChatGPT asks the user to confirm every call to a tool
