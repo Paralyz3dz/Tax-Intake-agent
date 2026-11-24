@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Form 8843 draft</title>
+  <link rel="stylesheet" href="/workspace.css">
+  <style>
+    [hidden] { display: none !important; }
+    .page { max-width: 980px; margin: auto; padding: clamp(16px, 3vw, 32px); display: grid; gap: 18px; }
+    h1 { margin: 0; font: 400 clamp(2.4rem, 6vw, 3.4rem)/1 var(--serif); }
+    h2 { margin: 0 0 10px; font-size: 1.05rem; }
+    .subtitle { margin: 6px 0 0; color: var(--muted); }
+    .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px;
+            box-shadow: var(--shadow); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 16px; }
+    label { display: grid; gap: 4px; font-size: .875rem; font-weight: 600; }
+    label small, .hint { font-weight: 400; color: var(--muted); font-size: .8rem; }
+    input, select, textarea { font: inherit; font-weight: 400; padding: 8px 10px; border: 1px solid var(--line);
+                              border-radius: 8px; background: white; color: var(--ink); }
+    textarea { resize: vertical; min-height: 64px; }
+    .inline { display: flex; align-items: center; gap: 8px; font-weight: 400; }
+    .trips { display: grid; gap: 8px; margin-top: 6px; }
+    .trip { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+    .trip label { flex: 1 1 280px; }
+    .date-field { display: flex; gap: 6px; }
+    .date-field select { flex: 1 1 auto; min-width: 0; }
+    .date-field select:first-child { flex-basis: 40%; }
+    button { font: inherit; font-weight: 600; border-radius: 8px; padding: 9px 16px; cursor: pointer;
+             border: 1px solid var(--accent); background: var(--accent); color: white; }
+    button.secondary { background: white; color: var(--accent); border-color: var(--line); }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+    .banner { border-radius: 10px; padding: 12px 14px; }
+    .banner.stop { background: #fdecea; border: 1px solid #f3b8b2; }
+    .banner.ok { background: #eaf6ee; border: 1px solid #b7dfc3; }
+    .banner.error { background: #fff4e5; border: 1px solid #f5cf94; }
+    .banner ul { margin: 6px 0 0; padding-left: 20px; }
+    table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+    th, td { text-align: left; vertical-align: top; padding: 7px 8px; border-bottom: 1px solid var(--line); }
+    th { color: var(--muted); font-weight: 600; }
+    .chip { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: .75rem; font-weight: 600; white-space: nowrap; }
+    .chip.filled { background: #e6f4ea; color: #1e6b3a; }
+    .chip.confirm { background: #fff3c4; color: #7a5a00; }
+    .chip.user_only { background: #e3ecf0; color: #35505e; }
+    .chip.missing { background: #fde2e1; color: #a1251b; }
+    .checks { display: grid; gap: 10px; }
+    .check { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; padding: 10px 12px;
+             border: 1px solid var(--line); border-radius: 10px; background: #fffdf3; }
+    .check input { margin-top: 4px; width: 18px; height: 18px; }
+    .check strong { display: block; }
+    .stale { color: #a1251b; font-size: .85rem; }
+  </style>
+</head>
+<body>
+<nav class="product-nav" aria-label="Workspace">
+  <div class="product-nav-inner">
+    <div class="product-links"><a href="/">Home</a><a href="/interview">Interview</a></div>
+  </div>
+</nav>
+<main class="page">
+  <header>
+    <h1>Form 8843 draft</h1>
+    <p class="subtitle">For F, J and M students: a ready-to-check draft of Form 8843, built from your interview.
+      What you type here is used only to build the PDF; it is not saved and is never sent to an AI model.</p>
+  </header>
+
+  <div id="no-interview" class="banner error" hidden>Open this page from a finished interview (the
+    <b>Draft Form 8843</b> button in the summary).</div>
+
+  <form id="details" class="card" autocomplete="off">
+    <h2>Your details (in English, as on your passport)</h2>
+    <div class="grid">
+      <label>First name and initial<input name="first_name" maxlength="100"></label>
+      <label>Last name<input name="last_name" maxlength="100"></label>
+      <label>Visa type<select name="visa_class"><option value="">Choose</option>
+        <option>F-1</option><option>J-1</option><option>M-1</option><option>Q-1</option></select></label>
+      <label>Date you entered the United States <small>first day of this stay, see your I-94</small>
+        <span data-date="first_entry"></span></label>
+      <label>Country of citizenship<input name="citizenship" maxlength="100"></label>
+      <label>Country that issued your passport<input name="passport_country" maxlength="100"></label>
+    </div>
+    <p class="hint">Not asked here on purpose: your passport number and SSN/ITIN. You write those by hand on the printed form.</p>
+
+    <label class="inline"><input type="checkbox" name="status_changed"> My visa status changed during 2025</label>
+    <div id="change" class="grid" hidden>
+      <label>Previous status<input name="previous_status" maxlength="40" placeholder="e.g. J-1"></label>
+      <label>Date of change<span data-date="status_change_date"></span></label>
+    </div>
+
+    <h2 style="margin-top:16px">Trips outside the U.S. since you entered</h2>
+    <p class="hint">The day you leave and the day you come back both count as days in the U.S.</p>
+    <div id="trips" class="trips"></div>
+    <button type="button" id="add-trip" class="secondary" style="margin-top:8px">Add a trip</button>
+
+    <h2 style="margin-top:16px">Income and mailing</h2>
+    <div class="inline">Did you have U.S. income in 2025 (wages, taxable scholarship, ...)?
+      <label class="inline"><input type="radio" name="has_us_income" value="no"> No</label>
+      <label class="inline"><input type="radio" name="has_us_income" value="yes"> Yes</label>
+    </div>
+    <div id="addresses" class="grid" hidden style="margin-top:10px">
+      <label>Address in your country of residence<textarea name="address_abroad" maxlength="200"></textarea></label>
+      <label>Address in the United States<textarea name="address_us" maxlength="200"></textarea></label>
+    </div>
+
+    <h2 style="margin-top:16px">Your school</h2>
+    <div class="grid">
+      <label>School name, address and telephone<textarea name="school" maxlength="200"></textarea></label>
+      <label>Director of your academic program: name, address, telephone
+        <small>ask your international student office whom to list</small>
+        <textarea name="program_director" maxlength="200"></textarea></label>
+    </div>
+    <div class="actions"><button type="submit">Check my form</button></div>
+  </form>
+
+  <section id="result" class="card" hidden>
+    <div id="stops"></div>
+    <h2>Every line of the draft</h2>
+    <table><thead><tr><th>Line</th><th>What it asks</th><th>Draft</th><th>Status</th><th>Note</th></tr></thead>
+      <tbody id="fields"></tbody></table>
+
+    <h2 style="margin-top:18px">Confirm what we worked out for you</h2>
+    <p class="hint">Download the review copy, compare each yellow item with your documents, then tick it here.</p>
+    <div id="checks" class="checks"></div>
+    <p id="stale" class="stale" hidden>You changed your details: check the form again before downloading.</p>
+    <div id="final-error" class="banner error" hidden></div>
+    <div class="actions">
+      <button type="button" id="review" class="secondary">Download review copy</button>
+      <button type="button" id="final" disabled>Download final PDF</button>
+    </div>
+  </section>
+</main>
+<script>
+(() => {
+  const interviewId = new URLSearchParams(location.search).get('interview');
+  const form = document.getElementById('details');
+  const STATUS = { filled: 'Filled', confirm: 'Please confirm', user_only: 'You write this', missing: 'Missing' };
+  let plan = null;
+  let stale = false;
+
+  if (!interviewId) { document.getElementById('no-interview').hidden = false; form.hidden = true; return; }
+
+  function el(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  // English date picker, independent of the browser's language: Month / Day / Year selects that keep
+  // an ISO date (YYYY-MM-DD) in a hidden input, which is what the form and the server read.
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
+                  'September', 'October', 'November', 'December'];
+  function dateField(name, value = '') {
+    const wrap = el('span', 'date-field');
+    const hidden = el('input'); hidden.type = 'hidden'; if (name) hidden.name = name;
+    const pick = (label, options) => {
+      const select = el('select'); select.setAttribute('aria-label', label);
+      select.append(new Option(label, ''), ...options.map(([text, val]) => new Option(text, val)));
+      return select;
+    };
+    const pad = n => String(n).padStart(2, '0');
+    const thisYear = new Date().getFullYear();
+    const month = pick('Month', MONTHS.map((m, i) => [m, pad(i + 1)]));
+    const day = pick('Day', Array.from({ length: 31 }, (_, i) => [String(i + 1), pad(i + 1)]));
+    const year = pick('Year', Array.from({ length: thisYear - 1990 + 1 }, (_, i) => [String(thisYear - i), String(thisYear - i)]));
+    function sync() {
+      const last = month.value ? new Date(Number(year.value) || 2000, Number(month.value), 0).getDate() : 31;
+      [...day.options].forEach((o, i) => { o.hidden = o.disabled = i > last; });   // no Feb 30
+      if (Number(day.value) > last) day.value = '';
+      hidden.value = month.value && day.value && year.value ? `${year.value}-${month.value}-${day.value}` : '';
+    }
+    [month, day, year].forEach(select => select.addEventListener('input', sync));
+    const [y, m, d] = (value || '').split('-');
+    if (y && m && d) { year.value = y; month.value = m; day.value = d; }
+    sync();
+    wrap.append(month, day, year, hidden);
+    return wrap;
+  }
+  document.querySelectorAll('[data-date]').forEach(slot => slot.replaceWith(dateField(slot.dataset.date)));
+
+  function addTrip(left = '', returned = '') {
+    const row = el('div', 'trip');
+    const a = el('label', null, 'Left the U.S.'); a.append(dateField('', left));
+    const b = el('label', null, 'Came back'); b.append(dateField('', returned));
+    const remove = el('button', 'secondary', 'Remove'); remove.type = 'button';
+    remove.onclick = () => { row.remove(); markStale(); };
+    row.append(a, b, remove);
+    document.getElementById('trips').append(row);
+  }
+  document.getElementById('add-trip').onclick = () => { addTrip(); markStale(); };
+
+  function details() {
+    const data = Object.fromEntries(new FormData(form).entries());
+    const income = form.querySelector('input[name=has_us_income]:checked');
+    data.has_us_income = income ? income.value === 'yes' : null;
+    data.status_changed = form.status_changed.checked;
+    data.trips = [...document.querySelectorAll('#trips .trip')].map(row => {
+      const [left, returned] = row.querySelectorAll('input');
+      return { left: left.value, returned: returned.value };
+    }).filter(t => t.left || t.returned);
+    return data;
+  }
+
+  function syncVisibility() {
+    document.getElementById('change').hidden = !form.status_changed.checked;
+    const income = form.querySelector('input[name=has_us_income]:checked');
+    document.getElementById('addresses').hidden = !(income && income.value === 'no');
+  }
+
+  function markStale() {
+    syncVisibility();
+    if (!plan) return;
+    stale = true;
+    document.getElementById('stale').hidden = false;
+    document.querySelectorAll('#checks input').forEach(box => { box.checked = false; });
+    updateFinal();
+  }
+  form.addEventListener('input', markStale);
+
+  async function post(path, extra = {}) {
+    return fetch(`/api/interviews/${encodeURIComponent(interviewId)}/forms/8843/${path}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ details: details(), ...extra }),
+    });
+  }
+
+  async function errorText(response) {
+    try { const body = await response.json(); return body.reasons || [body.detail || response.statusText]; }
+    catch { return [response.statusText]; }
+  }
+
+  function groupKey(id) { return id.replace(/_\d{4}$/, ''); }
+
+  function render() {
+    const stops = document.getElementById('stops'); stops.textContent = '';
+    if (plan.stops.length) {
+      const box = el('div', 'banner stop', plan.applicable ? 'Talk to a preparer before you mail this form:'
+                                                           : 'Form 8843 does not apply to you:');
+      const ul = el('ul'); plan.stops.forEach(s => ul.append(el('li', null, s.reason))); box.append(ul);
+      stops.append(box);
+    }
+    const body = document.getElementById('fields'); body.textContent = '';
+    plan.fields.forEach(f => {
+      const tr = el('tr');
+      const chip = el('span', 'chip ' + f.status, STATUS[f.status]);
+      const status = el('td'); status.append(chip);
+      tr.append(el('td', null, f.line), el('td', null, f.label), el('td', null, f.value || '—'), status, el('td', null, f.note));
+      body.append(tr);
+    });
+    const checks = document.getElementById('checks'); checks.textContent = '';
+    plan.to_confirm.forEach(key => {
+      const box = el('label', 'check'); const input = el('input'); input.type = 'checkbox'; input.value = key;
+      input.onchange = updateFinal;
+      const text = el('div');
+      if (key === 'filing') {
+        text.append(el('strong', null, `Mailing: due ${plan.filing.due}`), el('span', null, plan.filing.note + (plan.filing.mail_to ? ' ' + plan.filing.mail_to : '')));
+      } else {
+        const group = plan.fields.filter(f => groupKey(f.id) === key);
+        const shown = group.length > 1 ? group.map(f => `${f.id.slice(-4)}: ${f.value || 'blank'}`).join(' · ') : group[0].value;
+        text.append(el('strong', null, `Line ${group[0].line}: ${shown}`), el('span', null, group[0].note));
+      }
+      box.append(input, text); checks.append(box);
+    });
+    stale = false;
+    document.getElementById('stale').hidden = true;
+    document.getElementById('final-error').hidden = true;
+    document.getElementById('result').hidden = false;
+    updateFinal();
+  }
+
+  function confirmed() { return [...document.querySelectorAll('#checks input:checked')].map(box => box.value); }
+
+  function updateFinal() {
+    const all = plan && plan.to_confirm.every(key => confirmed().includes(key));
+    document.getElementById('final').disabled = !(plan && plan.ready_for_final && all && !stale);
+  }
+
+  function showError(lines) {
+    const box = document.getElementById('final-error'); box.textContent = '';
+    const ul = el('ul'); lines.forEach(line => ul.append(el('li', null, line))); box.append(ul);
+    box.hidden = false;
+  }
+
+  async function download(path, name, extra) {
+    const response = await post(path, extra);
+    if (!response.ok) { showError(await errorText(response)); return; }
+    const url = URL.createObjectURL(await response.blob());
+    const a = el('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const response = await post('plan');
+    if (!response.ok) { showError(await errorText(response)); document.getElementById('result').hidden = false; return; }
+    plan = await response.json();
+    render();
+  });
+  document.getElementById('review').onclick = () => download('review.pdf', 'form-8843-review-copy.pdf');
+  document.getElementById('final').onclick = () => download('final.pdf', 'form-8843.pdf', { confirmed: confirmed() });
+  syncVisibility();
+})();
+</script>
+</body>
+</html>

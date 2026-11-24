@@ -9,13 +9,13 @@ How to run Tax Agent as a public website on one Linux server. The local setup in
 |---|---|---|
 | `app` container | Pages, interview engine, preparer review | the server |
 | Prebuilt guide passages (`data/processed/guide_evidence.json`) | Official text under each interview question | baked into the image |
-| LLM provider (`LLM_*`) | Free-text answers, tax questions mid-interview, document reading, chat page | OpenAI, or any OpenAI-compatible server |
-| Knowledge base (PostgreSQL + pgvector, `DATABASE_URL`) | Live retrieval: chat page, tax questions mid-interview | the existing RDS instance |
+| LLM provider (`LLM_*`) | Free-text answers, tax questions mid-interview, document reading, chat API | OpenAI, or any OpenAI-compatible server |
+| Knowledge base (PostgreSQL + pgvector, `DATABASE_URL`) | Live retrieval: chat API, tax questions mid-interview | the existing RDS instance |
 | Ollama (`--profile retrieval`) | Query embeddings for live retrieval | the server (about 1 GB of RAM) |
 | Caddy (`--profile https`) | HTTPS certificate, security headers | the server |
 
 Without the `retrieval` profile the interview still works completely, with passages, because
-they are prebuilt. Only the chat page and tax questions asked mid-interview need live
+they are prebuilt. Only the chat API and tax questions asked mid-interview need live
 retrieval; without it they answer "currently unavailable".
 
 ## Before the first deployment (on your own machine)
@@ -44,7 +44,7 @@ Any VM with Docker works. These steps use AWS Lightsail, in the same region as t
 knowledge base (us-west-2):
 
 1. Create an instance: platform **Linux operating system**, blueprint **Ubuntu 24.04 LTS**,
-   plan **4 GB** (2 GB is enough without Ollama, i.e. without the chat page and tax questions).
+   plan **4 GB** (2 GB is enough without Ollama, i.e. without the chat API and tax questions).
 2. **Networking** tab: attach a static IP, and add an IPv4 firewall rule for **HTTPS (443)**
    from any IPv4 address. SSH (22) and HTTP (80) are there by default.
 3. Allow the static IP in the RDS security group: RDS > the database > Connectivity &
@@ -92,7 +92,7 @@ Start it:
 
 ```bash
 docker compose --profile https up -d --build                        # interview only
-docker compose --profile https --profile retrieval up -d --build    # + chat page and tax questions
+docker compose --profile https --profile retrieval up -d --build    # + chat API and tax questions
 docker compose ps                                                   # app should become "healthy"
 ```
 
@@ -116,7 +116,7 @@ then delete the instance, and delete the static IP (an unattached static IP is b
 
 | Visitor | Gets in with | Can use |
 |---|---|---|
-| Client / assistant | an invite code | `/interview`, `/` (chat) |
+| Client / assistant | an invite code | `/interview`, Form 8843 draft |
 | Preparer | a `TAX_AGENT_PREPARERS` account | everything, including `/preparer` |
 
 - Remove a code from `TAX_AGENT_INVITE_CODES` and restart to sign out everyone who used it.
@@ -128,7 +128,7 @@ then delete the instance, and delete the static IP (an unattached static IP is b
 Every model call made with the site's key counts against two daily limits (UTC days):
 `TAX_AGENT_LLM_CALLS_PER_VISITOR` per browser and `TAX_AGENT_LLM_CALLS_PER_DAY` for the whole
 site. When a limit is reached, interviews keep working: free-text answers are refused with
-"enter the value directly", as when the model is switched off. The chat page answers 429.
+"enter the value directly", as when the model is switched off. The chat API answers 429.
 
 The caps count model calls, not messages. Every call is counted: the interview's note reader,
 tax questions, document reading, the reranking step of live retrieval, and each call the chat
