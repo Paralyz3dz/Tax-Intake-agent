@@ -24,6 +24,7 @@ from pathlib import Path
 
 from src.app.interviews import MCP_OWNER, InterviewClosed, InterviewNotFound, InterviewService
 from src.app.limits import get_budget
+from src.forms import f8843
 from src.llm.client import set_call_guard
 from src.workflow.engine import INTAKE, ROOT, load_scenario, sections
 
@@ -159,3 +160,29 @@ def lookup_official_text(query: str) -> dict:
         return {"error": f"Knowledge base unavailable: {type(exc).__name__}"}
     return {"matches": [{"citation": m.get("citation"), "text": (m.get("text") or "")[:800]} for m in matches],
             "note": "Use these passages to explain the question. They are not advice for this client."}
+
+
+def draft_form_8843(interview_id: str) -> dict:
+    """Which Form 8843 lines the interview already settles, what stops the form, and what the client fills in.
+
+    No names, addresses, dates or passport numbers pass through the assistant: the client types those on
+    the web form page (/form-8843), which builds the PDF. This view is for the assistant and the preparer.
+    """
+    try:
+        state = get_service().get(interview_id, owner=MCP_OWNER)["state"]
+    except InterviewNotFound:
+        return {"error": "No interview with this id. Start a new one with start_interview."}
+    plan = f8843.build_plan(state["facts"], None, state["unsure"])
+    return {
+        "applicable": plan["applicable"],
+        "needs_preparer": [s["reason"] for s in plan["stops"]],
+        "settled_by_interview": [{"line": f["line"], "label": f["label"], "answer": f["value"]}
+                                 for f in plan["fields"] if f["status"] == f8843.FILLED and f["value"]],
+        "open_from_interview": [{"line": f["line"], "label": f["label"], "why": f["note"]}
+                                for f in plan["fields"] if f["id"] in ("l12", "l13") and f["status"] == f8843.MISSING],
+        "client_fills_on_form_page": sorted({f"line {f['line']}: {f['label']}" for f in plan["fields"]
+                                             if f["status"] in (f8843.MISSING, f8843.USER_ONLY)
+                                             and f["id"] not in ("l12", "l13")}),
+        "tell_the_client": ("Form 8843 is a statement, not a tax return. You check, sign and mail it yourself; "
+                            "nothing is filed for you. Do not tell me your passport number or SSN."),
+    }
