@@ -35,7 +35,7 @@
       "I-94 travel history"
     ],
     "retrieval_query": "exempt individual student F J M Q visa days not counted substantial presence test",
-    "source": "IRS Form 8843 Instructions",
+    "source": "IRS Form 8843",
     "origin": "IRS Form 8843 (2025) Part I line 1a, Part III; Pub 4012 (Rev. 10-2026) Tab L, Substantial Presence Test Decision Chart 1 (Student) (structure only)",
     "status": "derived_official"
   },
@@ -46,7 +46,7 @@
     "why_ask": "Days can be excluded as an exempt student only if the student substantially complied with the visa requirements (Pub 4012 Tab L, step 2).",
     "required_docs": [],
     "retrieval_query": "student exempt individual substantially complied with visa requirements",
-    "source": "IRS Form 8843 Instructions",
+    "source": "IRS Form 8843",
     "origin": "Pub 4012 (Rev. 10-2026) Tab L, Substantial Presence Test Decision Chart 1 (Student) (structure only), step 2",
     "status": "derived_official"
   },
@@ -57,7 +57,7 @@
     "why_ask": "A student stops being an exempt individual after 5 calendar years unless an exception applies (Form 8843, Part III line 12).",
     "required_docs": [],
     "retrieval_query": "student exempt for more than 5 calendar years Form 8843 line 12",
-    "source": "IRS Form 8843 Instructions",
+    "source": "IRS Form 8843",
     "origin": "IRS Form 8843 (2025) Part III line 12; Pub 4012 (Rev. 10-2026) Tab L, Substantial Presence Test Decision Chart 1 (Student) (structure only), step 3",
     "status": "derived_official"
   },
@@ -68,7 +68,7 @@
     "why_ask": "Steps toward permanent residence are asked on Form 8843 (Part III line 13) and can stop days from being excluded.",
     "required_docs": [],
     "retrieval_query": "applied for lawful permanent resident status Form 8843 student",
-    "source": "IRS Form 8843 Instructions",
+    "source": "IRS Form 8843",
     "origin": "IRS Form 8843 (2025) Part III line 13",
     "status": "derived_official"
   }
