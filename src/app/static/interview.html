@@ -1364,9 +1364,6 @@
     documentStatus.textContent = notices.join(' ');
   });
 
-  // Full intake: Form 13614-C base + topic modules opened by the answers; the assistant sets priority
-  // topics and a background note. Student: playbooks/student_8843, only the Form 8843 questions, run
-  // on its own (no other topics), then the summary links to the form draft.
   const SCENARIO = 'intake', STUDENT_SCENARIO = 'student_8843';
   let intake = null, chosen = [], mode = SCENARIO;
   function setMode(next) {
@@ -1379,7 +1376,6 @@
   }
   document.querySelectorAll('#mode-chips button').forEach(btn =>
     btn.addEventListener('click', () => { if (!busy) setMode(btn.dataset.mode); }));
-  // Home: back to the start page in place (the interview stays saved and reopens from history).
   $('#home-link').addEventListener('click', event => {
     if (workspace.hidden || busy) return;
     event.preventDefault();

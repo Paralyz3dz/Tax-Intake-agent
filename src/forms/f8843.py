@@ -50,7 +50,7 @@ FORMS = Path(__file__).resolve().parent
 SPEC_FILE = FORMS / "f8843_2025.json"
 
 FILLED, CONFIRM, USER_ONLY, MISSING = "filled", "confirm", "user_only", "missing"
-FILING = "filing"   # the "how and when to mail" item, confirmed like a field
+FILING = "filing"
 
 FONT, SIZE, MIN_SIZE = "Helvetica", 9.0, 6.0
 VISA_LETTER = {"f_visa": "F", "j_visa": "J", "m_visa": "M"}
@@ -58,7 +58,6 @@ VISA_CLASS = re.compile(r"^[FJMQ]-1$")
 MAX_TEXT = 200
 MAX_TRIPS = 30
 
-# Interview answers that stop the draft: (fact, value, rule id in the student module or None).
 STOPS = [
     ("is_us_citizen", True, None, "U.S. citizens do not file Form 8843."),
     ("has_green_card", True, None, "Green card holders are resident aliens and do not file Form 8843."),
@@ -121,8 +120,6 @@ def template_bytes(spec: dict | None = None) -> bytes:
         raise RuntimeError(f"{spec['template']} is not the form revision the field map was made for")
     return data
 
-
-# ---------------------------------------------------------------- details from the student
 
 def _text(raw: dict, key: str, limit: int = MAX_TEXT) -> str:
     value = raw.get(key)
@@ -194,8 +191,6 @@ def clean_details(raw: dict | None) -> dict:
     return details
 
 
-# ---------------------------------------------------------------- text fitting (plan and render agree)
-
 def _wrap(text: str, width: float, size: float) -> list[str]:
     lines = []
     for paragraph in text.split("\n"):
@@ -223,8 +218,6 @@ def fit(text: str, field: dict) -> tuple[list[str], float, bool]:
             return lines[:rows], size, False
         size -= 0.5
 
-
-# ---------------------------------------------------------------- the plan
 
 def confirm_key(field_id: str) -> str:
     """Fields the student confirms together: the three line 4a years are one item, the line 11 years another."""
@@ -414,8 +407,6 @@ def final_blockers(plan: dict, confirmed: set[str] | list[str]) -> list[str]:
         reasons.append("Not confirmed yet: " + "; ".join(unconfirmed))
     return reasons
 
-
-# ---------------------------------------------------------------- PDF
 
 HIGHLIGHT = {CONFIRM: colors.HexColor("#FFE066"), USER_ONLY: colors.HexColor("#9DB4C0"),
              MISSING: colors.HexColor("#F08080")}

@@ -191,7 +191,9 @@ state. Staged answers are available for 24 hours while the server is running. An
 used in an interview and their source filenames appear in the interview history.
 
 Start the server as above (`python -m uvicorn src.app.api:app --reload`) and open
-http://127.0.0.1:8000/interview. Choose any priority topics and select **Start interview**.
+http://127.0.0.1:8000/interview (http://127.0.0.1:8000 opens it too). Under **Interview type**, keep
+**Full tax intake** and choose any priority topics, or choose **International student: Form 8843** to ask
+only the six questions Form 8843 needs (`playbooks/student_8843/`). Then select **Start interview**.
 Use the **Interview history** icon on the setup or conversation page to reopen a saved
 interview. Use the pencil to rename an entry or the trash icon to delete it after confirmation.
 Completed web interviews appear under **In progress** until the assistant selects **Submit to preparer**.
@@ -211,6 +213,7 @@ interview table and index.
 | Page | Who | What |
 |---|---|---|
 | http://127.0.0.1:8000/interview | assistant | One intake for every client: optional topics to ask first and a background note, then one question at a time with why it is asked, documents to request and official passages; summary at the end |
+| http://127.0.0.1:8000/form-8843?interview=<id> | student | Opened from **Draft Form 8843** in the summary of an F, J or M student: Form 8843 draft from the interview plus details the student types (not saved, never sent to a model); review PDF with a checklist, then the final pages to sign and mail |
 | http://127.0.0.1:8000/preparer | preparer | Interviews from the web page and from MCP, by status; summary, interview record, approve / return |
 
 The intake is Form 13614-C plus topic modules opened by the answers (`playbooks/modules/`):

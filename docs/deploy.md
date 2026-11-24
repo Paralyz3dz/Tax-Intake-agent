@@ -138,10 +138,10 @@ agent makes. Exact answers (yes/no, amounts, options) and prebuilt guide passage
 |---|---|
 | Exact answer, or a question whose passages are prebuilt | 0 |
 | Free-text answer on the interview page | up to 2 (tell answer from question, read the answer) |
-| Tax question mid-interview | about 3 (classify, rerank, answer) |
+| Tax question mid-interview | 3 to 7 (classify, then up to 3 rounds of rerank + answer; a round searches again only when the passages leave a gap) |
 | One chat message | usually 3 (decide to search, rerank, answer) |
 
-So 200 calls per visitor is about 100 free-text answers or 60 chat messages. When the budget
+So 200 calls per visitor is about 100 free-text answers, or at least 28 tax questions mid-interview. When the budget
 runs out during live retrieval, passages come back unranked instead of failing.
 The MCP server is a separate process with its own counters: it reads the same two limits but
 does not share the web app's count. It has no per-browser visitors, so all MCP use shares one

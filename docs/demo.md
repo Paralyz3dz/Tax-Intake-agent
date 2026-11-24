@@ -1,17 +1,20 @@
 # Final demo script (11/30 – 12/1, about 10 minutes)
 
-Fictional clients only. Run from `D:\EE542\tax-agent` with the virtual environment active.
+Fictional clients only. The web part runs on the public server (`docs/deploy.md`); a local run is the backup.
 
 ## Before the demo
 
 ```powershell
 python -m pytest tests -q                       # everything green
-python -m uvicorn src.app.api:app --reload      # web server on http://127.0.0.1:8000
 ```
 
-- Open three tabs: `/interview`, `/preparer`, and Claude Desktop with the `tax-intake` server (see `docs/mcp.md`).
-- Start the RDS database and Ollama if showing retrieved passages; otherwise set `TAX_AGENT_RETRIEVAL=off`.
-- Optional clean slate: stop the server and delete `logs/interviews.sqlite3`.
+- Server: open `https://<DOMAIN>/healthz` (expects `"status":"ok"` and `"guide_passages":154`). Have the invite
+  code and a preparer account ready.
+- Open tabs: the site's `/interview` (signed in with the invite code), `/preparer` in a private window (signed
+  in as the preparer), and Claude Desktop with the `tax-intake` server (see `docs/mcp.md`).
+- MCP interviews are saved where the MCP server runs. To show one in `/preparer`, run the web server locally
+  next to Claude Desktop (`python -m uvicorn src.app.api:app --reload`), or point both at the same
+  `TAX_AGENT_INTERVIEW_DATABASE_URL`.
 
 ## 1. The problem (1 min)
 
@@ -20,36 +23,49 @@ review time. The tool is a digital clone of the preparer's interview: it does no
 
 ## 2. Web interview (3 min) — `/interview`
 
-1. Topic "Self-employment and gig income"; background: `W-2 job, drives Uber on weekends, two kids, travels to craft fairs`.
+1. Interview type **Full tax intake**; topic "Self-employment and gig income"; background:
+   `W-2 job, drives Uber on weekends, two kids, travels to craft fairs`.
 2. Point at "Asked now because the client mentioned 'drives'": trigger words reorder follow-ups.
 3. Open a question's "Why ask" and the official passage with its citation.
-4. Answer "mixed" for travel: an escalation appears in the sidebar.
-5. Type an unclear answer ("maybe?"): the engine refuses it and asks again.
-6. Complete the interview and select **Submit to preparer** on the summary.
+4. Ask a tax question in the reply box (e.g. "can I deduct my phone?"): the answer cites retrieved passages
+   and the interview repeats its question.
+5. Answer "mixed" for travel: an escalation appears in the sidebar.
+6. Type an unclear answer ("maybe?"): the engine refuses it and asks again.
+7. Complete the interview and select **Submit to preparer** on the summary.
 
-## 3. The user's own AI runs the interview (3 min) — Claude Desktop
+## 3. Student: Form 8843 (2 min) — `/interview`
+
+1. **Home**, then Interview type **International student: Form 8843**: only six questions.
+2. Answer no, no, F visa, yes, no, no. Select **Draft Form 8843** in the summary.
+3. Enter the entry date August 15, 2024 and one trip (left December 20, 2024, back January 10, 2025):
+   line 4a shows 356 days for 2025, to confirm.
+4. Download the review copy (marked, with a checklist). Point out that names and dates typed here are not
+   saved and never reach a model.
+
+## 4. The user's own AI runs the interview (2 min) — Claude Desktop
 
 1. Ask: *"Start a tax intake interview. The client is an F-1 graduate student who works as a TA."*
 2. Show that Claude asks one question at a time and declines to give tax advice.
 3. Point out the residency questions in the Pub 4012 / Form 8843 order.
 4. Explain: no API key of ours; the engine checks every answer the model sends.
 
-## 4. Preparer review (2 min) — `/preparer`
+## 5. Preparer review (1 min) — `/preparer`
 
-1. The F-1 interview appears under "Waiting for review", badge "AI assistant", next to web interviews.
-2. Open it: what needs the preparer (likely nonresident, Form 8843), questions and answers, documents,
-   reminders, the full interview record.
-3. Download the review PDF, then approve with a note.
+1. Interviews wait under "Waiting for review"; MCP interviews carry the badge "AI assistant".
+2. Open one: what needs the preparer, questions and answers, documents, reminders, the full record.
+3. Download the review PDF, then approve with a note (the decision records who made it).
 
-## 5. Why trust it (1 min)
+## 6. Why trust it (1 min)
 
 - Playbook checked against Form 13614-C (51/51), Direct File knockouts (102/102), the Pub 4012 scope chart,
-  and 13 replayed IRS-based and fictional cases (`docs/validation.md`).
-- Every question cites its IRS / FTB source; student questions also cite the IRC and Treasury Regulations.
+  and 9 replayed IRS-based and fictional cases (`docs/validation.md`).
+- Every question cites the IRS / FTB publication or instructions it follows.
 - When unsure, the tool escalates; the preparer decides.
 
 ## Backup plan
 
-- No network: `TAX_AGENT_RETRIEVAL=off`; the interview and review still work.
-- Claude Desktop not available: use the ChatGPT desktop app (Codex), or show a finished MCP interview
-  already in `/preparer`.
+- Server unreachable: run locally (`python -m uvicorn src.app.api:app --reload`, `TAX_AGENT_MODE=local`).
+- No knowledge base: `TAX_AGENT_RETRIEVAL=off`; the interview, Form 8843 and review still work, and interview
+  questions keep their prebuilt passages.
+- Claude Desktop not available: use the ChatGPT desktop app, or show a finished MCP interview already in
+  the local `/preparer`.
