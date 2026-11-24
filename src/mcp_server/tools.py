@@ -73,7 +73,6 @@ def _summary_dir() -> Path:
 
 
 def _shape(out: dict, state: dict) -> dict:
-    """Turn an engine output into what the host model needs: what to ask next, or the summary."""
     result = {"interview_id": state["interview_id"], "status": state["status"],
               "answered": state["answered"], "escalations": [f["reason"] for f in state["flags"]]}
     if out["type"] == "question":
@@ -111,7 +110,6 @@ def _with_count(result: dict) -> dict:
 
 
 def list_topics() -> dict:
-    """Topics the assistant can ask first (priority), and what a background note does."""
     definition, _ = load_scenario(INTAKE)
     return {"topics": sections(definition),
             "how_to_use": "Pass topic ids you are unsure about as `priority` to start_interview; they are asked "
@@ -121,7 +119,6 @@ def list_topics() -> dict:
 
 
 def start_interview(priority: list[str] | None = None, background: str = "") -> dict:
-    """Start one client intake and return the first question."""
     try:
         r = get_service().start(INTAKE, priority or [], background, owner=MCP_OWNER)
     except ValueError as exc:
@@ -130,7 +127,6 @@ def start_interview(priority: list[str] | None = None, background: str = "") -> 
 
 
 def submit_answer(interview_id: str, answer: str, client_note: str = "") -> dict:
-    """Send the client's answer to the current question; returns the next question or the summary."""
     try:
         service = get_service()
         if client_note.strip():
@@ -144,7 +140,6 @@ def submit_answer(interview_id: str, answer: str, client_note: str = "") -> dict
 
 
 def get_interview(interview_id: str) -> dict:
-    """Current state of an interview (answers so far, escalations, documents to collect)."""
     try:
         r = get_service().get(interview_id, owner=MCP_OWNER)
     except InterviewNotFound:
@@ -153,7 +148,6 @@ def get_interview(interview_id: str) -> dict:
 
 
 def lookup_official_text(query: str) -> dict:
-    """Search official IRS / FTB passages using a general tax topic without client details."""
     try:
         matches = get_service()._cached_search(query).get("matches", [])[:3]
     except Exception as exc:
@@ -163,10 +157,8 @@ def lookup_official_text(query: str) -> dict:
 
 
 def draft_form_8843(interview_id: str) -> dict:
-    """Which Form 8843 lines the interview already settles, what stops the form, and what the client fills in.
-
-    No names, addresses, dates or passport numbers pass through the assistant: the client types those on
-    the web form page (/form-8843), which builds the PDF. This view is for the assistant and the preparer.
+    """No names, addresses, dates or passport numbers pass through the assistant: the client
+    types those on /form-8843, which builds the PDF.
     """
     try:
         state = get_service().get(interview_id, owner=MCP_OWNER)["state"]

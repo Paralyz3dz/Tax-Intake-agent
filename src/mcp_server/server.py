@@ -136,7 +136,6 @@ def http_options(public: bool, token: str | None) -> tuple[str, bool]:
 
 
 def build_http_app(public: bool = False, token: str | None = None):
-    """The streamable HTTP app (SDK 2.x), with the path and Host check from http_options."""
     from mcp.server.transport_security import TransportSecuritySettings
     path, check_host = http_options(public, token)
     security = TransportSecuritySettings(

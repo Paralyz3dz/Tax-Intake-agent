@@ -1,12 +1,8 @@
 """
 interviews.py: the interview service behind the web API.
 
-Framework-free on purpose: api.py only translates HTTP <-> these methods, so this logic
-is tested without FastAPI and could sit behind any other UI later.
-Interviews and their current outputs are stored by owner so they can be resumed.
-
-Settings come from src/config.py (TAX_AGENT_RETRIEVAL, TAX_AGENT_LLM, the LLM_* provider,
-interview storage).
+Framework-free on purpose: api.py only translates HTTP <-> these methods, so this logic is tested
+without FastAPI and could sit behind another UI. Interviews are stored by owner so they can be resumed.
 """
 from __future__ import annotations
 
@@ -62,11 +58,7 @@ class StagedDocument:
 
 
 def list_playbooks() -> list[dict]:
-    """Return {"id", "title", "status", "sections"} for each playbook.
-
-    The modular intake (playbooks/modules/) comes first and lists the sections an assistant can
-    put first; then every single-scenario playbook (playbooks/<folder>/scenario.json).
-    """
+    """The modular intake first (with its sections), then every single-scenario playbook."""
     items = []
     if MODULES.exists():
         definition, _ = load_scenario(INTAKE)
@@ -81,12 +73,7 @@ def list_playbooks() -> list[dict]:
 
 
 def snapshot(state: State) -> dict:
-    """The part of the state the page's sidebar shows.
-
-    Returns interview_id, scenario, status, answered facts (not None), flags,
-    missing_docs, number of answers, and whether the last answer was read by
-    "rules" or the "model".
-    """
+    """What the page's sidebar shows."""
     history = [entry for entry in state.history if "tax_qa" not in entry and "submitted" not in entry]
     return {
         "interview_id": state.interview_id,
@@ -104,7 +91,6 @@ def snapshot(state: State) -> dict:
 
 
 def _no_search(query: str) -> dict:
-    """Retrieval switched off: always return no passages."""
     return {"matches": []}
 
 
@@ -131,11 +117,9 @@ class InterviewService:
 
     @classmethod
     def from_env(cls) -> "InterviewService":
-        """Build the service from settings (src/config.py): real retrieval unless
-        TAX_AGENT_RETRIEVAL=off, model calls if a model is configured and TAX_AGENT_LLM is not off.
-
-        Every model call goes through chat_json(), whose call guard counts it against the
-        daily budget (installed by api.py, see src/app/limits.py)."""
+        """Build from src/config.py settings. Every model call goes through chat_json(), whose call guard
+        counts it against the daily budget (src/app/limits.py).
+        """
         settings = app_settings()
         search = None if settings.retrieval_enabled else _no_search
         normalizer = None
@@ -155,11 +139,8 @@ class InterviewService:
                    tax_chat=document_chat, evidence=evidence)
 
     def _cached_search(self, query: str, *, question: dict | None = None) -> dict:
-        """Retrieve once per query and reuse the result.
-
-        A question shown again after an unreadable answer has the same retrieval_query,
-        so it does not embed and query the database a second time. Failed searches raise
-        and are not cached, so they are retried next time.
+        """Retrieve once per query: a question shown again after an unreadable answer reuses the result.
+        Failed searches raise and are not cached, so they are retried.
         """
         context = question if self.search is None and question is not None else {}
         key = (query, context.get("id"), context.get("question"), context.get("why_ask"))
@@ -200,7 +181,6 @@ class InterviewService:
             return self._store.list(owner)
 
     def purge_older_than(self, days: int) -> int:
-        """Data retention: delete interviews not updated for `days` days (0 = keep everything)."""
         if days <= 0:
             return 0
         with self._lock:
@@ -222,11 +202,7 @@ class InterviewService:
 
     def start(self, scenario: str, priority: list[str] | None = None, background: str = "",
               document_ids: list[str] | None = None, *, owner: str = "") -> dict:
-        """Start an interview for a playbook id and return its first question.
-
-        priority: sections the assistant is unsure about and wants asked first (intake only).
-        background: optional short client description; its trigger words reorder the interview.
-        Raises ValueError for an unknown scenario or priority section.
+        """ValueError for an unknown scenario or priority section.
         Returns {"output": first question guide, "state": snapshot}.
         """
         if scenario not in {p["id"] for p in list_playbooks()}:
@@ -241,11 +217,7 @@ class InterviewService:
 
     def answer(self, interview_id: str, answer_text: str | None, question_id: str | None = None,
                *, owner: str = "", document_ids: list[str] | None = None, tax_questions: bool = False) -> dict:
-        """Submit the assistant's answer to the current question (one engine step).
-
-        Raises InterviewNotFound, or InterviewClosed if the interview already ended.
-        Returns {"output": question | error | summary, "state": snapshot}.
-        """
+        """One engine step. Returns {"output": question | error | summary, "state": snapshot}."""
         tax_qa = None
         if tax_questions and answer_text is not None:
             with self._lock:
@@ -288,11 +260,7 @@ class InterviewService:
             return {"output": out, "state": snapshot(interview.state)}
 
     def undo(self, interview_id: str, *, owner: str = "") -> dict:
-        """Take back the last answer and show its question again (engine.undo).
-
-        Raises InterviewNotFound, InterviewClosed after the preparer's decision or when there is
-        nothing to undo. Returns {"output": question guide, "state": snapshot}.
-        """
+        """InterviewClosed after the preparer's decision, and also when there is nothing to undo."""
         with self._lock:
             interview = self._get(interview_id, owner)
             try:
@@ -489,12 +457,8 @@ class InterviewService:
 
     def decide(self, interview_id: str, approve: bool, note: str = "", *, owner: str = "",
                reviewer: str = "") -> dict:
-        """Record the preparer's decision on the summary.
-
-        Allowed only while status is "waiting_for_preparer" (else InterviewClosed).
-        Sets status to "approved" or "returned" and appends {"decision", "note"} to history,
-        plus "by": reviewer when a preparer is signed in (public mode).
-        Returns {"state": snapshot}.
+        """Only while waiting_for_preparer (else InterviewClosed). Appends {"decision", "note"} to history,
+        plus "by" when a preparer is signed in.
         """
         with self._lock:
             interview = self._get(interview_id, owner)
@@ -521,7 +485,7 @@ class InterviewService:
             return triggers
 
     def preparer_list(self, status: str | None = None, limit: int = 100) -> list[dict]:
-        """Every interview (web page and MCP), newest first, for the preparer review page."""
+        """All owners' interviews (web and MCP), newest first."""
         with self._lock:
             rows = self._store.list_all(status, limit)
         items = []
@@ -541,7 +505,7 @@ class InterviewService:
         return items
 
     def preparer_get(self, interview_id: str) -> dict:
-        """One interview of any owner, with question labels and the summary once finished."""
+        """One interview of any owner, with question labels, and the summary once finished."""
         with self._lock:
             found = self._store.find(interview_id)
         if found is None:
@@ -568,7 +532,7 @@ class InterviewService:
         return {"state": snapshot(interview.state), "title": record["title"], "created_at": record["created_at"]}
 
     def preparer_decide(self, interview_id: str, approve: bool, note: str = "", *, reviewer: str = "") -> dict:
-        """The preparer's decision on an interview of any owner (see decide)."""
+        """decide() for an interview of any owner."""
         with self._lock:
             found = self._store.find(interview_id)
         if found is None:

@@ -38,7 +38,6 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _env(*names: str, default: str = "") -> str:
-    """The first of names that is set to a non-empty value, else default."""
     for name in names:
         value = os.getenv(name, "").strip()
         if value:

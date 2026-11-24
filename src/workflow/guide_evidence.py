@@ -34,7 +34,7 @@ def fingerprint(question: dict) -> str:
 
 
 def all_questions(scenarios: list[str]) -> list[dict]:
-    """Every question of these scenarios, once each (the modular intake shares many)."""
+    """Each question once (the modular intake shares many across scenarios)."""
     from src.workflow.engine import load_scenario
     seen, out = set(), []
     for scenario in scenarios:
@@ -48,10 +48,8 @@ def all_questions(scenarios: list[str]) -> list[dict]:
 
 
 def build(scenarios: list[str], search, meta: dict | None = None) -> dict:
-    """Retrieve passages for every question. A failed question is listed, not fatal.
-
-    Each match keeps only the fields build_guide() reads (KEPT). A result marked
-    rerank_fallback (unranked candidates) counts as a failure, so it is not frozen into the file.
+    """Retrieve passages for every question; a failed question is listed, not fatal.
+    A rerank_fallback result (unranked candidates) counts as failed, so it is never frozen into the file.
     """
     entries, failures = {}, []
     questions = all_questions(scenarios)

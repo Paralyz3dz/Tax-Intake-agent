@@ -44,7 +44,6 @@ ON CONFLICT (chunk_id) DO UPDATE SET
 
 
 def content_hash(text):
-    """Short fingerprint of the embedded text."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 

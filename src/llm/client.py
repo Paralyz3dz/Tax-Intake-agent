@@ -49,12 +49,10 @@ def check_call_guard() -> None:
 def chat_json(system: str, user: str, model: str | None = None, timeout: float = 30, *,
               images: Sequence[tuple[str, bytes]] = (), response_format: dict | None = None,
               max_completion_tokens: int | None = None) -> dict:
-    """Send one system + one user message and return the model's reply as a dict.
+    """One system + one user message -> the reply as a dict (temperature 0, JSON mode).
 
-    The request uses temperature 0 and JSON mode, so the reply must be a JSON object.
-    The openai package is imported only here, at call time, so tests and rules-only
-    runs do not need it installed. Any failure is raised as LLMUnavailable, including a
-    call refused by the call guard.
+    openai is imported only here, at call time, so tests and rules-only runs do not need it.
+    Every failure, including a call refused by the guard, is raised as LLMUnavailable.
     """
     check_call_guard()
     settings = llm_settings()
